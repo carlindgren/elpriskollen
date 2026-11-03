@@ -1,0 +1,14 @@
+// Only for local end-to-end tests against a fake price API: npm run test:e2e
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "elpriskollen-e2e",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ELPRIS_BASE_URL": "http://127.0.0.1:8798",
+    "NOW_OVERRIDE": "2026-11-03T20:10:00+01:00",
+    "DONATE_URL": "https://buy.stripe.com/test_beer",
+    "REPO_URL": "https://github.com/carlindgren/elpriskollen"
+  }
+}

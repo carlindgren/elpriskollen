@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "elpriskollen",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "REPO_URL": "https://github.com/carlindgren/elpriskollen",
+    // Set to your Buy Me a Coffee / Stripe payment link to show the "Bjud på en öl" button.
+    "DONATE_URL": ""
+  },
+  "observability": { "enabled": true }
+}

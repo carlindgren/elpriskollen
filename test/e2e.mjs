@@ -1,0 +1,139 @@
+// End-to-end: runs the Worker with `wrangler dev` against a fake price API and
+// calls every tool through the official MCP client, as Claude would.
+//   npm run test:e2e
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
+import assert from "node:assert/strict";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { dayJson } from "./fixtures.mjs";
+
+const WORKER = "http://127.0.0.1:8788";
+const LAST_PUBLISHED = "2026-11-04"; // "now" is 2026-11-03 20:10, after 13:00, so tomorrow is out
+const calls = [];
+
+const api = createServer((req, res) => {
+  calls.push(req.url);
+  const m = /^\/api\/v1\/prices\/(\d{4})\/(\d{2})-(\d{2})_(SE[1-4])\.json$/.exec(req.url);
+  if (!m) return res.writeHead(404).end();
+  const date = `${m[1]}-${m[2]}-${m[3]}`;
+  if (date > LAST_PUBLISHED) return res.writeHead(404).end();
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(dayJson(m[4], date)));
+});
+
+function waitFor(child, text, ms = 90_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for "${text}"`)), ms);
+    let log = "";
+    const onData = (chunk) => {
+      log += chunk;
+      if (log.includes(text)) {
+        clearTimeout(timer);
+        resolve();
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.on("exit", (code) => reject(new Error(`wrangler exited (${code}):\n${log}`)));
+  });
+}
+
+let worker;
+let failed = false;
+try {
+  await new Promise((r) => api.listen(8798, "127.0.0.1", r));
+  worker = spawn("npx", ["wrangler", "dev", "-c", "wrangler.e2e.jsonc", "--ip", "127.0.0.1", "--port", "8788"], {
+    env: { ...process.env, WRANGLER_SEND_METRICS: "false", NO_COLOR: "1" },
+    detached: true,
+  });
+  await waitFor(worker, "Ready on");
+
+  // Start page
+  const page = await (await fetch(`${WORKER}/`)).text();
+  assert.match(page, /Elpriskollen/);
+  assert.match(page, /http:\/\/127\.0\.0\.1:8788\/mcp/);
+  assert.match(page, /Bjud på en öl/);
+  assert.match(page, /Elpriset just nu\.se/);
+
+  for (const mode of [{ pin: "2026-07-28" }, "legacy"]) {
+    const client = new Client({ name: "e2e", version: "1" }, { versionNegotiation: { mode } });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${WORKER}/mcp`)));
+    const { tools } = await client.listTools();
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices"]);
+    assert.ok(tools.every((t) => t.annotations?.readOnlyHint));
+    const call = async (name, args) => {
+      const r = await client.callTool({ name, arguments: args });
+      return r.isError ? { error: r.content[0].text } : JSON.parse(r.content[0].text);
+    };
+
+    const today = await call("get_prices", { area: "SE3" });
+    assert.equal(today.date, "2026-11-03");
+    assert.equal(today.prices.length, 24);
+    assert.equal(today.prices[0].time, "00:00");
+    const quarterly = await call("get_prices", { area: "SE3", date: "2026-11-04", resolution: "quarter", include_vat: true });
+    assert.equal(quarterly.prices.length, 96);
+    assert.equal(quarterly.summary.lowest.ore, -2.5); // -2 öre + 25 % VAT
+    const future = await call("get_prices", { area: "SE3", date: "2026-11-05" });
+    assert.equal(future.published, false);
+    assert.match(future.message, /one day ahead/); // 11-05 is the day after tomorrow
+
+    const nowPrice = await call("get_current_price", { area: "SE4" });
+    assert.deepEqual([nowPrice.now.from, nowPrice.now.to], ["20:00", "20:15"]);
+    assert.equal(nowPrice.tomorrow_published, true);
+    assert.ok(nowPrice.next_hours.length >= 6);
+
+    const dish = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2 });
+    assert.equal(dish.mode, "in one go");
+    assert.deepEqual([dish.cheapest.day, dish.cheapest.start, dish.cheapest.end], ["tomorrow", "00:00", "02:00"]);
+    assert.ok(dish.cheapest.spot_cost_kr > 0);
+    assert.equal(dish.if_started_now, undefined); // earliest is 22:00, not now
+    assert.equal(dish.if_started_at_earliest.start, "22:00");
+    assert.ok(dish.if_started_at_earliest.cheapest_saves.ore_per_kwh > 0);
+    assert.ok(dish.most_expensive.cheapest_saves.percent > 0);
+
+    const asap = await call("find_cheapest_time", { area: "SE3", minutes: 90 });
+    assert.ok(asap.if_started_now.cheapest_saves.ore_per_kwh > 0);
+    assert.equal(asap.if_started_now.start, "20:00");
+
+    const car = await call("find_cheapest_time", { area: "SE3", minutes: 240, latest: "2026-11-04 16:00", together: false, include_vat: true });
+    assert.equal(car.mode, "separate periods");
+    assert.ok(car.periods.some((p) => p.start === "13:15"));
+
+    const late = await call("find_cheapest_time", { area: "SE3", minutes: 60, latest: "2026-11-05 07:00" });
+    assert.match(late.note, /aren't published yet/);
+
+    const bad = await call("find_cheapest_time", { area: "SE3", minutes: 60, earliest: "2026-11-01 10:00" });
+    assert.match(bad.error, /past/);
+
+    const areas = await call("compare_areas", {});
+    assert.deepEqual(areas.areas.map((a) => a.area), ["SE1", "SE2", "SE3", "SE4"]);
+    assert.ok(areas.areas[0].average < areas.areas[3].average);
+
+    const week = await call("get_daily_averages", { area: "SE3" });
+    assert.equal(week.days.length, 7);
+    assert.equal(week.period, "2026-10-28 – 2026-11-03");
+    const tooLong = await call("get_daily_averages", { area: "SE3", start_date: "2026-01-01", end_date: "2026-03-01" });
+    assert.match(tooLong.error, /31 days/);
+
+    console.log(`protocol ${client.getNegotiatedProtocolVersion()}: all tools ok`);
+    console.log("  dishwasher:", JSON.stringify(dish.cheapest), "| saves vs worst:", JSON.stringify(dish.most_expensive.cheapest_saves));
+    await client.close();
+  }
+
+  // The worker caches days: each file fetched once across both protocol runs.
+  const unique = new Set(calls);
+  assert.equal(unique.size + calls.filter((c) => c.includes("11-05")).length - 1, calls.length);
+  console.log(`price API calls: ${calls.length} (${unique.size} unique)`);
+  console.log("E2E PASSED");
+} catch (error) {
+  failed = true;
+  console.error("E2E FAILED:", error);
+} finally {
+  if (worker?.pid) {
+    try {
+      process.kill(-worker.pid, "SIGTERM");
+    } catch {}
+  }
+  api.close();
+  setTimeout(() => process.exit(failed ? 1 : 0), 500);
+}
