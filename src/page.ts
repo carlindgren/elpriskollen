@@ -147,10 +147,16 @@ export function adminPage(items: FeedbackItem[]): string {
 ${rows || "<p>Inga förslag än.</p>"}</main></body></html>`;
 }
 
-export function ntfyTestPage(result: NotifyResult, topic: string | undefined): string {
+export function ntfyTestPage(result: NotifyResult, topic: string | undefined, hasToken: boolean): string {
+  const quotaHint =
+    result.status === 429 && !hasToken
+      ? "<p>ntfy.sh räknar gratisgränsen per IP-adress, och Cloudflare delar sina IP-adresser med många andra sajter. Skapa ett gratis konto på ntfy.sh, gör en access token (tk_…) och lägg in den som hemligheten <code>NTFY_TOKEN</code>. Då räknas gränsen på ditt konto i stället.</p>"
+      : result.status === 401 || result.status === 403
+        ? "<p>ntfy godkände inte din <code>NTFY_TOKEN</code>. Kontrollera att den är rätt kopierad och inte borttagen.</p>"
+        : "";
   const verdict = result.sent
     ? "<p><strong>Skickat!</strong> ntfy tog emot notisen. Får du ingen notis i mobilen: kontrollera att appen prenumererar på exakt samma ämne som nedan.</p>"
-    : `<p><strong>Inte skickat.</strong> ${escape(result.detail)}</p>`;
+    : `<p><strong>Inte skickat.</strong> ${escape(result.detail)}</p>${quotaHint}`;
   return `<!doctype html>
 <html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex"><title>Testnotis – Elpriskollen</title>
@@ -159,6 +165,7 @@ export function ntfyTestPage(result: NotifyResult, topic: string | undefined): s
 <h1>Testnotis</h1>
 ${verdict}
 <p>Ämne (NTFY_TOPIC): ${topic ? `<code>${escape(topic)}</code>` : "<em>inte satt</em>"}</p>
+<p>Konto (NTFY_TOKEN): ${hasToken ? "inlagd" : "<em>inte satt</em>"}</p>
 ${result.status ? `<p>ntfy svarade HTTP ${result.status}.</p>` : ""}
 <p><a href="/admin">Tillbaka till förslagen</a></p>
 </main></body></html>`;

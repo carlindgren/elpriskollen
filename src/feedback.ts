@@ -6,6 +6,11 @@ export interface FeedbackEnv {
   ADMIN_PASSWORD?: string;
   /** Secret ntfy topic: a push notification goes there for every new suggestion. */
   NTFY_TOPIC?: string;
+  /**
+   * ntfy access token (tk_…) from a free ntfy.sh account. Without it ntfy.sh counts messages per IP address,
+   * and Cloudflare shares its outgoing addresses with many other sites, so the free quota runs out.
+   */
+  NTFY_TOKEN?: string;
   /** ntfy server, default https://ntfy.sh (overridden in tests). */
   NTFY_URL?: string;
   /** This site's public address, used for the notification's link to /admin. */
@@ -91,6 +96,7 @@ export async function notify(env: FeedbackEnv, item: Pick<FeedbackItem, "kind" |
     Tags: item.kind === "bug" ? "warning" : item.kind === "praise" ? "tada" : "bulb",
   };
   if (env.PUBLIC_URL) headers.Click = `${env.PUBLIC_URL.replace(/\/+$/, "")}/admin`;
+  if (env.NTFY_TOKEN) headers.Authorization = `Bearer ${env.NTFY_TOKEN.trim()}`;
   try {
     const response = await fetch(`${base}/${encodeURIComponent(env.NTFY_TOPIC)}`, {
       method: "POST",

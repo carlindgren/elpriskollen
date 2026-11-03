@@ -46,7 +46,7 @@ export default {
       }
       if (url.pathname === "/admin/ntfy-test") {
         const result = await notify(env, { kind: "other", source: "web", message: "Testnotis från adminsidan. Fungerar det här är allt klart!" });
-        return new Response(ntfyTestPage(result, maskedTopic(env)), {
+        return new Response(ntfyTestPage(result, maskedTopic(env), !!env.NTFY_TOKEN), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
         });
       }

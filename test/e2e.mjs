@@ -17,7 +17,7 @@ const api = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
-      pushes.push({ url: req.url, title: req.headers.title, tags: req.headers.tags, click: req.headers.click, body });
+      pushes.push({ url: req.url, title: req.headers.title, tags: req.headers.tags, click: req.headers.click, auth: req.headers.authorization, body });
       res.writeHead(200).end("{}");
     });
     return;
@@ -161,10 +161,12 @@ try {
   assert.equal(pushes.length, 3);
   assert.equal(pushes[0].url, "/ntfy/elpriskollen-test-topic");
   assert.equal(pushes[0].click, "https://elpriskollen.example/admin");
+  assert.equal(pushes[0].auth, "Bearer tk_e2etoken");
   assert.match(Buffer.from(pushes[0].title.slice(10, -2), "base64").toString(), /^Elpriskollen: Ny funktion$/);
   assert.ok(pushes.every((p) => !p.body.includes("test@example.com")), "contact address never pushed");
   const testPage = await (await fetch(`${WORKER}/admin/ntfy-test`, { headers: basic("e2e-admin-password") })).text();
   assert.match(testPage, /Skickat!/);
+  assert.match(testPage, /Konto \(NTFY_TOKEN\): inlagd/);
   assert.match(testPage, /elpriskollen-…pic \(23 tecken\)/);
   assert.equal(pushes.length, 4);
   assert.equal((await fetch(`${WORKER}/admin/ntfy-test`)).status, 401);

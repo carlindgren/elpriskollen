@@ -35,6 +35,8 @@ Förslag kommer in från formuläret på startsidan och via verktyget `send_feed
 
 Om du vill få en push-notis i mobilen för varje nytt förslag lägger du till hemligheten `NTFY_TOPIC` med ett långt, slumpmässigt ämnesnamn och prenumererar på samma ämne i appen [ntfy](https://ntfy.sh). Notisen innehåller typen av förslag och en kort förhandsvisning, aldrig avsändarens e-post. Om du trycker på notisen öppnas `/admin`.
 
+Lägg också in `NTFY_TOKEN`, en access token som börjar med `tk_` från ett gratis konto på ntfy.sh. Utan den räknar ntfy.sh gratisgränsen per IP-adress, och Cloudflare delar sina utgående IP-adresser med väldigt många andra sajter, så gränsen tar ofta slut. På `/admin/ntfy-test` kan du kontrollera att allt fungerar.
+
 ## Data
 
 Elpriser tillhandahålls av [Elpriset just nu.se](https://www.elprisetjustnu.se). Varje dag hämtas en gång och sparas i minnet en stund, så att vi inte belastar deras API i onödan.

@@ -9,6 +9,7 @@
   "vars": {
     "ADMIN_PASSWORD": "e2e-admin-password",
     "NTFY_TOPIC": "elpriskollen-test-topic",
+    "NTFY_TOKEN": "tk_e2etoken",
     "NTFY_URL": "http://127.0.0.1:8798/ntfy",
     "PUBLIC_URL": "https://elpriskollen.example",
     "ELPRIS_BASE_URL": "http://127.0.0.1:8798",
