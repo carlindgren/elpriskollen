@@ -44,6 +44,10 @@ npm run test:e2e   # kör Workern lokalt mot ett låtsas-API och anropar alla ve
 
 Den körs på Cloudflare Workers, och gratisplanen räcker gott. Sätt `DONATE_URL` i `wrangler.jsonc` till en betallänk för att visa knappen "Bjud på en öl" på startsidan.
 
+## Stöd projektet
+
+Elpriskollen är gratis och byggs på fritiden. Har den sparat dig en slant får du gärna [bjuda på en öl på Ko-fi](https://ko-fi.com/carlindgren) 🍺
+
 ## Licens
 
 MIT
