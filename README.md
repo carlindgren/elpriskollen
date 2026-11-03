@@ -33,6 +33,8 @@ Priserna är Nord Pools spotpris, utan elbolagets påslag, energiskatt och näta
 
 Förslag kommer in från formuläret på startsidan och via verktyget `send_feedback`. De sparas i Cloudflare KV (bindningen `FEEDBACK`, som skapas automatiskt) och kan läsas på `/admin`. För att logga in där lägger du till hemligheten `ADMIN_PASSWORD` (minst 12 tecken) under Settings → Variables and Secrets. Användarnamnet kan vara vad som helst. Ett spamskydd begränsar antalet förslag till 5 per IP-adress och timme och 200 per dygn totalt.
 
+Om du vill få en push-notis i mobilen för varje nytt förslag lägger du till hemligheten `NTFY_TOPIC` med ett långt, slumpmässigt ämnesnamn och prenumererar på samma ämne i appen [ntfy](https://ntfy.sh). Notisen innehåller typen av förslag och en kort förhandsvisning, aldrig avsändarens e-post. Om du trycker på notisen öppnas `/admin`.
+
 ## Data
 
 Elpriser tillhandahålls av [Elpriset just nu.se](https://www.elprisetjustnu.se). Varje dag hämtas en gång och sparas i minnet en stund, så att vi inte belastar deras API i onödan.

@@ -10,8 +10,18 @@ import { dayJson } from "./fixtures.mjs";
 const WORKER = "http://127.0.0.1:8788";
 const LAST_PUBLISHED = "2026-11-04"; // "now" is 2026-11-03 20:10, after 13:00, so tomorrow is out
 const calls = [];
+const pushes = [];
 
 const api = createServer((req, res) => {
+  if (req.url.startsWith("/ntfy/")) {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      pushes.push({ url: req.url, title: req.headers.title, tags: req.headers.tags, click: req.headers.click, body });
+      res.writeHead(200).end("{}");
+    });
+    return;
+  }
   calls.push(req.url);
   const m = /^\/api\/v1\/prices\/(\d{4})\/(\d{2})-(\d{2})_(SE[1-4])\.json$/.exec(req.url);
   if (!m) return res.writeHead(404).end();
@@ -147,7 +157,13 @@ try {
   assert.match(admin, /Svar till: test@example\.com/);
   assert.ok(admin.indexOf("Visa totalpris") < admin.indexOf("Lägg till Norge"), "newest first");
   assert.doesNotMatch(admin, /spam spam/);
-  console.log("feedback form, tool and admin page ok");
+  // One push per saved suggestion (3), none for the honeypot or the too-short ones.
+  assert.equal(pushes.length, 3);
+  assert.equal(pushes[0].url, "/ntfy/elpriskollen-test-topic");
+  assert.equal(pushes[0].click, "https://elpriskollen.example/admin");
+  assert.match(Buffer.from(pushes[0].title.slice(10, -2), "base64").toString(), /^Elpriskollen: Ny funktion$/);
+  assert.ok(pushes.every((p) => !p.body.includes("test@example.com")), "contact address never pushed");
+  console.log("feedback form, tool, admin page and push notifications ok");
 
   // The worker caches days: each file fetched once across both protocol runs.
   const unique = new Set(calls);

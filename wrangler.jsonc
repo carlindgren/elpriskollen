@@ -7,6 +7,7 @@
   // Created automatically on first deploy.
   "kv_namespaces": [{ "binding": "FEEDBACK" }],
   "vars": {
+    "PUBLIC_URL": "https://elpriskollen.carlindgren.workers.dev",
     "REPO_URL": "https://github.com/carlindgren/elpriskollen",
     // Set to your Buy Me a Coffee / Stripe payment link to show the "Bjud på en öl" button.
     "DONATE_URL": "https://ko-fi.com/carlindgren"

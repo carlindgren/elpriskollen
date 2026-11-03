@@ -4,6 +4,12 @@
 export interface FeedbackEnv {
   FEEDBACK?: KVNamespace;
   ADMIN_PASSWORD?: string;
+  /** Secret ntfy topic: a push notification goes there for every new suggestion. */
+  NTFY_TOPIC?: string;
+  /** ntfy server, default https://ntfy.sh (overridden in tests). */
+  NTFY_URL?: string;
+  /** This site's public address, used for the notification's link to /admin. */
+  PUBLIC_URL?: string;
 }
 
 export const KINDS = ["feature", "bug", "praise", "other"] as const;
@@ -62,7 +68,33 @@ export async function saveFeedback(
   const key = `fb:${String(9_999_999_999_999 - now).padStart(13, "0")}:${crypto.randomUUID().slice(0, 8)}`;
   await env.FEEDBACK.put(key, JSON.stringify(item));
   await env.FEEDBACK.put(dayKey, String(today + 1), { expirationTtl: 3 * 86_400 });
+  await notify(env, item);
   return { ok: true };
+}
+
+const KIND_TEXT: Record<Kind, string> = { feature: "Ny funktion", bug: "Något är fel", praise: "Beröm", other: "Annat" };
+
+/** Push a short notice to the owner's phone via ntfy. Never includes the contact address. */
+async function notify(env: FeedbackEnv, item: FeedbackItem): Promise<void> {
+  if (!env.NTFY_TOPIC) return;
+  const base = (env.NTFY_URL || "https://ntfy.sh").replace(/\/+$/, "");
+  const preview = item.message.length > 140 ? `${item.message.slice(0, 137)}…` : item.message;
+  const headers: Record<string, string> = {
+    // ntfy reads non-ASCII header values as RFC 2047 when encoded like this.
+    Title: `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(`Elpriskollen: ${KIND_TEXT[item.kind]}`)))}?=`,
+    Tags: item.kind === "bug" ? "warning" : item.kind === "praise" ? "tada" : "bulb",
+  };
+  if (env.PUBLIC_URL) headers.Click = `${env.PUBLIC_URL.replace(/\/+$/, "")}/admin`;
+  try {
+    await fetch(`${base}/${encodeURIComponent(env.NTFY_TOPIC)}`, {
+      method: "POST",
+      headers,
+      body: `${preview}\n(${item.source === "claude" ? "via Claude" : "via webben"})`,
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // A missed notification must never lose the suggestion itself.
+  }
 }
 
 export async function listFeedback(env: FeedbackEnv, limit = 100): Promise<FeedbackItem[]> {
