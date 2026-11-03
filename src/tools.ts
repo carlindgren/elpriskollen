@@ -12,10 +12,12 @@ import {
   VAT,
 } from "./analysis";
 import { AREAS, ElprisClient, FIRST_DATE, PriceError, type Area, type Quarter } from "./elpris";
+import { KINDS, MAX_MESSAGE, saveFeedback } from "./feedback";
 import { addDays, isDate, localDate, localTime, parseLocal } from "./time";
 
 export interface ToolEnv {
   ELPRIS_BASE_URL?: string;
+  FEEDBACK?: KVNamespace;
   /** Fixed "now" for tests, ISO 8601. */
   NOW_OVERRIDE?: string;
 }
@@ -44,6 +46,7 @@ export function buildServer(env: ToolEnv): McpServer {
         "and, unless include_vat is set, VAT. Say this when talking about what electricity costs. " +
         PUBLISH_NOTE +
         " Use find_cheapest_time for 'when should I run the dishwasher / washing machine / charge the car'. " +
+        "If the user wants something Elpriskollen can't do yet, you may offer to pass it on with send_feedback. " +
         "Data: Elpriset just nu.se. Answer in the user's language (usually Swedish).",
     },
   );
@@ -301,6 +304,31 @@ export function buildServer(env: ToolEnv): McpServer {
           missing_days: rows.length > published.length ? rows.filter((r) => !r.qs).map((r) => r.date) : undefined,
           source: SOURCE,
         };
+      }),
+  );
+
+  server.registerTool(
+    "send_feedback",
+    {
+      title: "Send feedback to the developer",
+      description:
+        "Send a feature request, bug report or praise to the person who runs Elpriskollen. Only use this when the " +
+        "user asks to send feedback or agrees to pass a suggestion on. Write the message in the user's words, show " +
+        "it to them and get their OK before sending. Leave out names, addresses and other personal details; add a " +
+        "contact e-mail only if the user gives one and wants a reply.",
+      inputSchema: z.object({
+        message: z.string().min(5).max(MAX_MESSAGE).describe("The feedback, in the user's own words"),
+        kind: z.enum(KINDS).optional().describe("feature (default for wishes), bug, praise or other"),
+        area: area.optional(),
+        contact: z.string().max(120).optional().describe("E-mail for a reply, only if the user wants one"),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ message, kind, area: a, contact }) =>
+      run(async () => {
+        const saved = await saveFeedback(env, { source: "claude", kind, message, area: a, contact });
+        if (!saved.ok) throw new Error(saved.reason);
+        return { sent: true, note: "Thanks! The developer reads every suggestion." };
       }),
   );
 

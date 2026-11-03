@@ -59,8 +59,10 @@ try {
     const client = new Client({ name: "e2e", version: "1" }, { versionNegotiation: { mode } });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${WORKER}/mcp`)));
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices"]);
-    assert.ok(tools.every((t) => t.annotations?.readOnlyHint));
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices", "send_feedback"]);
+    assert.ok(tools.filter((t) => t.name !== "send_feedback").every((t) => t.annotations?.readOnlyHint === true));
+    assert.equal(tools.find((t) => t.name === "send_feedback").annotations.readOnlyHint, false);
+    assert.ok(tools.every((t) => t.title || t.annotations?.title));
     const call = async (name, args) => {
       const r = await client.callTool({ name, arguments: args });
       return r.isError ? { error: r.content[0].text } : JSON.parse(r.content[0].text);
@@ -115,10 +117,37 @@ try {
     const tooLong = await call("get_daily_averages", { area: "SE3", start_date: "2026-01-01", end_date: "2026-03-01" });
     assert.match(tooLong.error, /31 days/);
 
+    const fb = await call("send_feedback", { message: `Lägg till Norge också (${JSON.stringify(mode)})`, kind: "feature", area: "SE3" });
+    assert.equal(fb.sent, true);
+    const fbShort = await call("send_feedback", { message: "hej" });
+    assert.ok(fbShort.error);
+
     console.log(`protocol ${client.getNegotiatedProtocolVersion()}: all tools ok`);
     console.log("  dishwasher:", JSON.stringify(dish.cheapest), "| saves vs worst:", JSON.stringify(dish.most_expensive.cheapest_saves));
     await client.close();
   }
+
+  // Feedback form on the start page
+  const post = (body) =>
+    fetch(`${WORKER}/feedback`, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
+  const ok = await post({ message: "Visa totalpris med nätavgift <b>tack</b>", kind: "feature", contact: "test@example.com" });
+  assert.equal(ok.status, 303);
+  assert.match(ok.headers.get("location"), /status=tack#forslag$/);
+  assert.match(await (await fetch(ok.headers.get("location"))).text(), /Tack! Ditt förslag har skickats/);
+  assert.match((await post({ message: "hej" })).headers.get("location"), /status=kort/);
+  assert.match((await post({ message: "spam spam spam", website: "http://spam" })).headers.get("location"), /status=tack/);
+
+  // Admin page
+  assert.equal((await fetch(`${WORKER}/admin`)).status, 401);
+  const basic = (pw) => ({ Authorization: `Basic ${Buffer.from(`carl:${pw}`).toString("base64")}` });
+  assert.equal((await fetch(`${WORKER}/admin`, { headers: basic("wrong-password-123") })).status, 401);
+  const admin = await (await fetch(`${WORKER}/admin`, { headers: basic("e2e-admin-password") })).text();
+  assert.match(admin, /Förslag \(3\)/); // two from Claude, one from the web; the honeypot one is dropped
+  assert.match(admin, /&#60;b&#62;tack&#60;\/b&#62;/); // escaped
+  assert.match(admin, /Svar till: test@example\.com/);
+  assert.ok(admin.indexOf("Visa totalpris") < admin.indexOf("Lägg till Norge"), "newest first");
+  assert.doesNotMatch(admin, /spam spam/);
+  console.log("feedback form, tool and admin page ok");
 
   // The worker caches days: each file fetched once across both protocol runs.
   const unique = new Set(calls);

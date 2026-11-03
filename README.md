@@ -25,8 +25,13 @@ https://elpriskollen.carlindgren.workers.dev/mcp
 | `find_cheapest_time` | Den billigaste tiden att köra något, till exempel disk, tvätt eller bilen, inom ett tidsfönster. Svaret visar också hur mycket billigare det är än att starta nu och ungefärlig kostnad om man anger kWh. Den kan även välja flera separata perioder. |
 | `compare_areas` | Snitt, lägsta och högsta pris i SE1–SE4 för en dag |
 | `get_daily_averages` | Dagssnitt för upp till 31 dagar, med periodens billigaste och dyraste dag |
+| `send_feedback` | Skickar ett förslag eller en felrapport till utvecklaren. Claude använder det bara när användaren ber om det. |
 
 Priserna är Nord Pools spotpris, utan elbolagets påslag, energiskatt och nätavgift. Moms läggs till om man ber om det. Morgondagens priser publiceras runt kl 13.
+
+## Förslag och feedback
+
+Förslag kommer in från formuläret på startsidan och via verktyget `send_feedback`. De sparas i Cloudflare KV (bindningen `FEEDBACK`, som skapas automatiskt) och kan läsas på `/admin`. För att logga in där lägger du till hemligheten `ADMIN_PASSWORD` (minst 12 tecken) under Settings → Variables and Secrets. Användarnamnet kan vara vad som helst. Ett spamskydd begränsar antalet förslag till 5 per IP-adress och timme och 200 per dygn totalt.
 
 ## Data
 
