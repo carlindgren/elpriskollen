@@ -163,6 +163,11 @@ try {
   assert.equal(pushes[0].click, "https://elpriskollen.example/admin");
   assert.match(Buffer.from(pushes[0].title.slice(10, -2), "base64").toString(), /^Elpriskollen: Ny funktion$/);
   assert.ok(pushes.every((p) => !p.body.includes("test@example.com")), "contact address never pushed");
+  const testPage = await (await fetch(`${WORKER}/admin/ntfy-test`, { headers: basic("e2e-admin-password") })).text();
+  assert.match(testPage, /Skickat!/);
+  assert.match(testPage, /elpriskollen-…pic \(23 tecken\)/);
+  assert.equal(pushes.length, 4);
+  assert.equal((await fetch(`${WORKER}/admin/ntfy-test`)).status, 401);
   console.log("feedback form, tool, admin page and push notifications ok");
 
   // The worker caches days: each file fetched once across both protocol runs.

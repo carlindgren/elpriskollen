@@ -1,5 +1,5 @@
 // The start page: what Elpriskollen is and how to add it to Claude or ChatGPT.
-import type { FeedbackItem } from "./feedback";
+import type { FeedbackItem, NotifyResult } from "./feedback";
 
 export type FormStatus = "tack" | "kort" | "manga" | "fel";
 
@@ -142,5 +142,24 @@ export function adminPage(items: FeedbackItem[]): string {
   article { background:#fff; border:1px solid #e4e6ea; border-radius: 10px; padding: .8rem 1rem; margin: .7rem 0; }
   header { color:#5b6170; font-size:.9rem; } p { margin:.4rem 0 0; } .contact { color:#1f7a4d; font-size:.95rem; }
 </style></head>
-<body><main><h1>Förslag (${items.length})</h1>${rows || "<p>Inga förslag än.</p>"}</main></body></html>`;
+<body><main><h1>Förslag (${items.length})</h1>
+<p><a href="/admin/ntfy-test">Skicka en testnotis till mobilen</a></p>
+${rows || "<p>Inga förslag än.</p>"}</main></body></html>`;
+}
+
+export function ntfyTestPage(result: NotifyResult, topic: string | undefined): string {
+  const verdict = result.sent
+    ? "<p><strong>Skickat!</strong> ntfy tog emot notisen. Får du ingen notis i mobilen: kontrollera att appen prenumererar på exakt samma ämne som nedan.</p>"
+    : `<p><strong>Inte skickat.</strong> ${escape(result.detail)}</p>`;
+  return `<!doctype html>
+<html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Testnotis – Elpriskollen</title>
+<style>body{margin:0;font:16px/1.55 system-ui,sans-serif;background:#fbfaf7;color:#16181d}main{max-width:40rem;margin:0 auto;padding:2.5rem 1.25rem}code{background:#eee;padding:.1rem .3rem;border-radius:4px}</style>
+</head><body><main>
+<h1>Testnotis</h1>
+${verdict}
+<p>Ämne (NTFY_TOPIC): ${topic ? `<code>${escape(topic)}</code>` : "<em>inte satt</em>"}</p>
+${result.status ? `<p>ntfy svarade HTTP ${result.status}.</p>` : ""}
+<p><a href="/admin">Tillbaka till förslagen</a></p>
+</main></body></html>`;
 }

@@ -74,28 +74,51 @@ export async function saveFeedback(
 
 const KIND_TEXT: Record<Kind, string> = { feature: "Ny funktion", bug: "Något är fel", praise: "Beröm", other: "Annat" };
 
+export interface NotifyResult {
+  sent: boolean;
+  status?: number;
+  detail: string;
+}
+
 /** Push a short notice to the owner's phone via ntfy. Never includes the contact address. */
-async function notify(env: FeedbackEnv, item: FeedbackItem): Promise<void> {
-  if (!env.NTFY_TOPIC) return;
+export async function notify(env: FeedbackEnv, item: Pick<FeedbackItem, "kind" | "message" | "source">): Promise<NotifyResult> {
+  if (!env.NTFY_TOPIC) return { sent: false, detail: "NTFY_TOPIC is not set." };
   const base = (env.NTFY_URL || "https://ntfy.sh").replace(/\/+$/, "");
   const preview = item.message.length > 140 ? `${item.message.slice(0, 137)}…` : item.message;
   const headers: Record<string, string> = {
-    // ntfy reads non-ASCII header values as RFC 2047 when encoded like this.
+    // ntfy decodes RFC 2047 encoded-words, which keeps non-ASCII titles safe in a header.
     Title: `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(`Elpriskollen: ${KIND_TEXT[item.kind]}`)))}?=`,
     Tags: item.kind === "bug" ? "warning" : item.kind === "praise" ? "tada" : "bulb",
   };
   if (env.PUBLIC_URL) headers.Click = `${env.PUBLIC_URL.replace(/\/+$/, "")}/admin`;
   try {
-    await fetch(`${base}/${encodeURIComponent(env.NTFY_TOPIC)}`, {
+    const response = await fetch(`${base}/${encodeURIComponent(env.NTFY_TOPIC)}`, {
       method: "POST",
       headers,
       body: `${preview}\n(${item.source === "claude" ? "via Claude" : "via webben"})`,
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(5000),
     });
-  } catch {
+    const text = (await response.text()).slice(0, 300);
+    if (!response.ok) {
+      console.warn(`ntfy answered HTTP ${response.status}: ${text}`);
+      return { sent: false, status: response.status, detail: text };
+    }
+    return { sent: true, status: response.status, detail: "ntfy accepted the message." };
+  } catch (error) {
     // A missed notification must never lose the suggestion itself.
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`ntfy failed: ${detail}`);
+    return { sent: false, detail };
   }
 }
+
+/** The topic with its middle hidden, so the owner can check the value without exposing it. */
+export function maskedTopic(env: FeedbackEnv): string | undefined {
+  const t = env.NTFY_TOPIC;
+  if (!t) return undefined;
+  return t.length <= 8 ? `${t.slice(0, 2)}… (${t.length} tecken)` : `${t.slice(0, 13)}…${t.slice(-3)} (${t.length} tecken)`;
+}
+
 
 export async function listFeedback(env: FeedbackEnv, limit = 100): Promise<FeedbackItem[]> {
   if (!env.FEEDBACK) return [];

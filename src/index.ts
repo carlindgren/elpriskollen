@@ -2,8 +2,8 @@
 // /mcp  the MCP endpoint (no sign-in: the data is public)
 // /     a short Swedish page on how to add it to Claude or ChatGPT
 import { createMcpHandler, type McpHttpHandler } from "@modelcontextprotocol/server";
-import { isAdmin, listFeedback, saveFeedback, type FeedbackEnv } from "./feedback";
-import { adminPage, landingPage, type FormStatus } from "./page";
+import { isAdmin, listFeedback, maskedTopic, notify, saveFeedback, type FeedbackEnv } from "./feedback";
+import { adminPage, landingPage, ntfyTestPage, type FormStatus } from "./page";
 import { buildServer, type ToolEnv } from "./tools";
 
 export interface Env extends ToolEnv, FeedbackEnv {
@@ -36,12 +36,18 @@ export default {
     if (url.pathname === "/feedback" && request.method === "POST") {
       return handleFeedbackForm(request, env, url.origin);
     }
-    if (url.pathname === "/admin") {
+    if (url.pathname === "/admin" || url.pathname === "/admin/ntfy-test") {
       if (!env.ADMIN_PASSWORD) return new Response("Not found", { status: 404 });
       if (!(await isAdmin(request, env))) {
         return new Response("Logga in med ditt ADMIN_PASSWORD (valfritt användarnamn).", {
           status: 401,
           headers: { "WWW-Authenticate": 'Basic realm="Elpriskollen admin", charset="UTF-8"' },
+        });
+      }
+      if (url.pathname === "/admin/ntfy-test") {
+        const result = await notify(env, { kind: "other", source: "web", message: "Testnotis från adminsidan. Fungerar det här är allt klart!" });
+        return new Response(ntfyTestPage(result, maskedTopic(env)), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
         });
       }
       return new Response(adminPage(await listFeedback(env)), {
