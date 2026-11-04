@@ -66,6 +66,8 @@ describe("grid companies", () => {
     expect(pickCustomer(flatOnly)!.missing).toBe("Villa 20 A, 20 000 kWh/år");
     expect(pickCustomer(flatOnly, "villa 16 A")!.missing).toBe("villa 16 A");
     expect(pickCustomer(flatOnly, "lägenhet")!.missing).toBeUndefined();
+    expect(pickCustomer(real, "hus med 16 A")!.customer.label).toBe("Villa 16A, 5 000 kWh/år");
+    expect(pickCustomer(real, "lgh")!.customer.label).toBe("Lägenhet 16A, 2 000 kWh/år");
     const villa = pickCustomer(detail, "villa 20")!.customer;
     expect(feeForYear(villa, 2026)).toMatchObject({ year: "2026", fee: { rorlig_ore_per_kwh: 20 } });
     expect(feeForYear(villa, 2025)!.fee.rorlig_ore_per_kwh).toBe(18);

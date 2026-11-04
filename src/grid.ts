@@ -272,6 +272,12 @@ export function resolveCompany(companies: GridCompany[], query: string): Resolve
   return { candidates: [...current, ...hits.filter((c) => c.latest_year !== newest)].slice(0, 15) };
 }
 
+// What people call their home, to the words Ei's standard customers use.
+const DWELLING: Record<string, string> = {
+  hus: "villa", house: "villa", villan: "villa", radhus: "villa", lgh: "lagenhet", apartment: "lagenhet",
+  flat: "lagenhet", lagenheten: "lagenhet", bostadsratt: "lagenhet", hyresratt: "lagenhet",
+};
+
 const hasFee = (c: CustomerType) => Object.values(c.years).some((f) => f.rorlig_ore_per_kwh !== undefined);
 
 /**
@@ -281,11 +287,16 @@ const hasFee = (c: CustomerType) => Object.values(c.years).some((f) => f.rorlig_
  */
 export function pickCustomer(detail: GridDetail, wanted?: string, reference?: string): { customer: CustomerType; missing?: string } | undefined {
   const byWords = (list: CustomerType[], text: string) => {
-    const w = words(text);
+    const w = words(text)
+      .map((x) => DWELLING[x] ?? x)
+      .filter((x) => x.length > 1);
+    // "villa" or "lägenhet" in the request must match; the numbers only choose among those.
+    const kind = w.find((x) => x === "villa" || x === "lagenhet");
     let best: CustomerType | undefined;
     let bestScore = 0;
     for (const c of list) {
       const tokens = normalize(`${c.id} ${c.label}`).split(" ");
+      if (kind && !tokens.includes(kind)) continue;
       const score = w.filter((x) => tokens.some((t) => t === x || t.startsWith(x))).length;
       if (score > bestScore) [best, bestScore] = [c, score];
     }
