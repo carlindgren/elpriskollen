@@ -66,3 +66,72 @@ export function dayJson(area, date) {
   }
   return rows;
 }
+
+// Fake grid fee data in the shape of api.elprisernaidag.se (amounts excl. VAT).
+const CUSTOMERS = [
+  ["lagenhet-16a-2000", "Lägenhet, 16 A, 2 000 kWh/år"],
+  ["villa-16a-5000", "Villa, 16 A, 5 000 kWh/år"],
+  ["villa-20a-20000", "Villa, 20 A, 20 000 kWh/år"],
+];
+const COMPANIES = [
+  { slug: "ellevio", namn: "Ellevio", juridiskt_namn: "Ellevio AB", omrade: "Stockholm", variable: [30, 22, 20], fixed: [1800, 3000, 5000] },
+  { slug: "vattenfall-eldistribution", namn: "Vattenfall Eldistribution", juridiskt_namn: "Vattenfall Eldistribution AB", omrade: null, variable: [40, 35, 30], fixed: [2000, 3500, 6000] },
+  { slug: "goteborg-energi-nat", namn: "Göteborg Energi Nät", juridiskt_namn: "Göteborg Energi Nät AB", omrade: "Göteborg", variable: [20, 18, 15], fixed: [1500, 2500, 4000] },
+  { slug: "borlange-energi-elnat", namn: "Borlänge Energi Elnät", juridiskt_namn: "Borlänge Energi Elnät AB", omrade: "Borlänge", variable: [25, 24, 23], fixed: [1600, 2600, 4200] },
+  { slug: "eon-energidistribution", namn: "E.ON Energidistribution", juridiskt_namn: "E.ON Energidistribution AB", omrade: null, variable: [45, 40, 35], fixed: [2100, 3600, 6500] },
+];
+const annual = (fixed, variable, kwh) => {
+  const total = fixed + 100 + (variable * kwh) / 100;
+  return { fast_kr_per_ar: fixed, myndighetsavgift_kr_per_ar: 100, rorlig_ore_per_kwh: variable, totalt_kr_per_ar: total, totalt_kr_per_ar_inkl_moms: Math.round(total * 1.25) };
+};
+const KWH = [2000, 5000, 20000];
+
+export function gridOverview() {
+  return {
+    enhet: "kr/år, öre/kWh",
+    valuta: "SEK",
+    moms_not: "Belopp är exklusive moms om inte fältet heter inkl_moms.",
+    antal_foretag: COMPANIES.length,
+    senaste_ar: "2026",
+    median_referens_kr_per_ar_inkl_moms: 13000,
+    foretag: COMPANIES.map((c, i) => ({
+      id: `REL0000${i}`,
+      slug: c.slug,
+      namn: c.namn,
+      juridiskt_namn: c.juridiskt_namn,
+      omrade: c.omrade,
+      senaste_ar: "2026",
+      antal_typkunder: 3,
+      referens: { typkund: "villa-20a-20000", ar: "2026", ...annual(c.fixed[2], c.variable[2], 20000) },
+      detalj: `https://api.elprisernaidag.se/v1/elnatsavgifter/${c.slug}`,
+    })),
+    kalla_hamtad: "2026-10-01",
+  };
+}
+
+export function gridCompany(slug) {
+  const c = COMPANIES.find((x) => x.slug === slug);
+  if (!c) return null;
+  return {
+    id: "REL00001",
+    slug: c.slug,
+    namn: c.namn,
+    juridiskt_namn: c.juridiskt_namn,
+    omrade: c.omrade,
+    senaste_ar: "2026",
+    moms_not: "Belopp är exklusive moms om inte fältet heter inkl_moms.",
+    mot_median: { typkund: "villa-20a-20000", ar: "2026", skillnad_kr_per_ar_inkl_moms: -500, skillnad_procent: -3.8 },
+    typkunder: CUSTOMERS.map(([typkund, etikett], i) => ({
+      typkund,
+      etikett,
+      forandring: { fran_ar: "2025", till_ar: "2026", procent: 4.2 },
+      ar: {
+        2025: annual(c.fixed[i] - 100, c.variable[i] - 2, KWH[i]),
+        2026: annual(c.fixed[i], c.variable[i], KWH[i]),
+      },
+    })),
+    begransningar: ["Effektavgifter ingår i typkundernas årskostnad enligt Ei:s antaganden."],
+    sida: `https://elprisernaidag.se/elnat/${c.slug}/`,
+    kalla_hamtad: "2026-10-01",
+  };
+}

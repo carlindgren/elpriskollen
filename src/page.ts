@@ -81,6 +81,7 @@ export function landingPage(origin: string, env: PageEnv, status?: FormStatus): 
     <li>Är elen dyr just nu i Stockholm?</li>
     <li>Hur skiljer sig priset mellan SE1 och SE4 idag?</li>
     <li>Hur dyr var elen i oktober jämfört med september?</li>
+    <li>Vad kostar elen egentligen per kWh just nu? Jag bor i villa och har Ellevio.</li>
   </ul>
 
   <h2>Bra att veta</h2>
@@ -113,6 +114,7 @@ export function landingPage(origin: string, env: PageEnv, status?: FormStatus): 
 
   <footer>
     Elpriser tillhandahålls av <a href="https://www.elprisetjustnu.se" rel="noopener">Elpriset just nu.se</a>.
+    Nätavgifter från Energimarknadsinspektionen via <a href="https://elprisernaidag.se" rel="noopener">Elpriser i dag</a>.
     ${repo ? `Öppen källkod på <a href="${escape(repo)}" rel="noopener">GitHub</a>.` : ""}
     Inget om dig sparas, utom det du själv skickar via förslagsformuläret.
   </footer>

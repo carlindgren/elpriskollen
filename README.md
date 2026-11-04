@@ -15,7 +15,8 @@ https://elpriskollen.carlindgren.workers.dev/mcp
 - *Är elen dyr just nu i Stockholm?*
 - *Hur skiljer sig priset mellan SE1 och SE4 idag?*
 - *Hur dyr var elen i oktober?*
-- *Vad kostar elen egentligen per kWh just nu, med skatt och moms? Jag har 25 öre i överföringsavgift och 6 öre i påslag.*
+- *Vad kostar elen egentligen per kWh just nu? Jag bor i villa, har Ellevio och 6 öre i påslag.*
+- *Är Göteborg Energis nätavgift dyr jämfört med andra?*
 
 ## Verktyg
 
@@ -25,13 +26,14 @@ https://elpriskollen.carlindgren.workers.dev/mcp
 | `get_current_price` | Priset just nu, hur det står sig mot resten av dagen och de närmaste timmarna |
 | `find_cheapest_time` | Den billigaste tiden att köra något, till exempel disk, tvätt eller bilen, inom ett tidsfönster. Svaret visar också hur mycket billigare det är än att starta nu och ungefärlig kostnad om man anger kWh. Den kan även välja flera separata perioder. |
 | `get_total_price` | Vad elen faktiskt kostar per kWh: spotpris plus energiskatt och moms, och elbolagets påslag och nätbolagets överföringsavgift om man anger dem. Gäller nu, en viss tid eller dagens snitt. |
+| `get_grid_fees` | Nätavgifter för ett nätbolag enligt Energimarknadsinspektionen: fast avgift per år, rörlig avgift per kWh och total årskostnad för lägenhet och villor, och hur bolaget står sig mot medianen |
 | `compare_areas` | Snitt, lägsta och högsta pris i SE1–SE4 för en dag |
 | `get_daily_averages` | Dagssnitt för upp till 31 dagar, med periodens billigaste och dyraste dag |
 | `send_feedback` | Skickar ett förslag eller en felrapport till utvecklaren. Claude använder det bara när användaren ber om det. |
 
 Priserna är Nord Pools spotpris, utan elbolagets påslag, energiskatt och nätavgift. Moms läggs till om man ber om det. Morgondagens priser publiceras runt kl 13.
 
-`get_total_price` och `find_cheapest_time` räknar också fram totalpriset. Energiskatten följer Skatteverkets nivå för året (36,0 öre/kWh exkl. moms 2026, 9,6 öre lägre i de norra kommunerna med reducerad skatt). Påslag och överföringsavgift anger man själv, antingen i öre/kWh eller som procent av spotpriset för nätbolag med spotindexerad avgift. Fasta månadsavgifter och effektavgifter räknas inte in eftersom de inte beror på hur många kWh man använder.
+`get_total_price` och `find_cheapest_time` räknar också fram totalpriset. Energiskatten följer Skatteverkets nivå för året (36,0 öre/kWh exkl. moms 2026, 9,6 öre lägre i de norra kommunerna med reducerad skatt). Överföringsavgiften slås upp automatiskt om man nämner sitt nätbolag (till exempel Ellevio, Vattenfall Eldistribution eller E.ON), för den typkund som passar: lägenhet eller villa med olika säkringar. Man kan också ange den själv, i öre/kWh eller som procent av spotpriset för nätbolag med spotindexerad avgift. Elbolagets påslag anger man själv. Fasta månadsavgifter och effektavgifter räknas inte in eftersom de inte beror på hur många kWh man använder.
 
 ## Förslag och feedback
 
@@ -44,6 +46,8 @@ Lägg också in `NTFY_TOKEN`, en access token som börjar med `tk_` från ett gr
 ## Data
 
 Elpriser tillhandahålls av [Elpriset just nu.se](https://www.elprisetjustnu.se). Varje dag hämtas en gång och sparas i minnet en stund, så att vi inte belastar deras API i onödan.
+
+Nätavgifter kommer från Energimarknadsinspektionen via [Elpriser i dag](https://elprisernaidag.se) (CC BY 4.0). Deras API tillåter 120 anrop i timmen utan nyckel. Svaren sparas ett dygn i minnet och i KV, så det räcker gott. Vill du ha högre gräns kan du skapa en gratis nyckel med `curl -X POST https://api.elprisernaidag.se/nycklar` och lägga in den som hemligheten `ELPRISERNAIDAG_KEY`.
 
 ## Köra själv
 

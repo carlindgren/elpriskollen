@@ -14,10 +14,24 @@ import {
 import { AREAS, ElprisClient, FIRST_DATE, PriceError, type Area, type Quarter } from "./elpris";
 import { energyTax, hasCostSettings, missingParts, totalPrice, type CostSettings } from "./costs";
 import { KINDS, MAX_MESSAGE, saveFeedback } from "./feedback";
+import {
+  feeForYear,
+  GRID_SOURCE,
+  GRID_SOURCE_URL,
+  GridClient,
+  pickCustomer,
+  resolveCompany,
+  round0,
+  round1,
+  type GridCompany,
+} from "./grid";
 import { addDays, isDate, localDate, localTime, parseLocal, zonedToUtc } from "./time";
 
 export interface ToolEnv {
   ELPRIS_BASE_URL?: string;
+  GRID_BASE_URL?: string;
+  /** Optional key for api.elprisernaidag.se (2000 instead of 120 requests/hour). */
+  ELPRISERNAIDAG_KEY?: string;
   FEEDBACK?: KVNamespace;
   /** Fixed "now" for tests, ISO 8601. */
   NOW_OVERRIDE?: string;
@@ -62,6 +76,20 @@ const costParams = {
     .boolean()
     .optional()
     .describe("Household in a northern municipality with reduced energy tax (9.6 öre/kWh lower)"),
+  grid_company: z
+    .string()
+    .min(2)
+    .max(80)
+    .optional()
+    .describe(
+      "The user's grid company (elnätsbolag), e.g. 'Ellevio', 'Vattenfall Eldistribution', 'E.ON', 'Göteborg Energi', " +
+        "or a slug from get_grid_fees. Looks up its variable grid fee (Energimarknadsinspektionen). grid_fee_ore wins if both are given.",
+    ),
+  grid_customer_type: z
+    .string()
+    .max(60)
+    .optional()
+    .describe("With grid_company: what fits the user, e.g. 'lägenhet', 'villa 16 A', 'villa 20 A'. Default: house with a 20 A fuse, 20 000 kWh/year"),
 };
 const pickCosts = (a: CostSettings): CostSettings => ({
   grid_fee_ore: a.grid_fee_ore,
@@ -71,10 +99,11 @@ const pickCosts = (a: CostSettings): CostSettings => ({
   northern_tax_reduction: a.northern_tax_reduction,
 });
 const NOT_INCLUDED_ALWAYS = "fixed monthly fees and power fees (effektavgift), which don't depend on kWh";
+const companyList = (cs: GridCompany[]) => cs.map((c) => `${c.name} (${c.slug})`).join(", ");
 
 export function buildServer(env: ToolEnv): McpServer {
   const server = new McpServer(
-    { name: "elpriskollen", version: "1.0.0" },
+    { name: "elpriskollen", version: "1.1.0" },
     {
       instructions:
         "Swedish electricity spot prices (Nord Pool day-ahead) for SE1–SE4, per 15 minutes, in öre/kWh. " +
@@ -83,11 +112,66 @@ export function buildServer(env: ToolEnv): McpServer {
         PUBLISH_NOTE +
         " Use find_cheapest_time for 'when should I run the dishwasher / washing machine / charge the car', " +
         "and get_total_price for what electricity actually costs per kWh with energy tax, VAT and the user's own fees. " +
+        "If the user names their grid company (elnätsbolag), pass it as grid_company to get the grid fee looked up; " +
+        "get_grid_fees shows a grid company's fees and how they compare. " +
         "If the user wants something Elpriskollen can't do yet, you may offer to pass it on with send_feedback. " +
-        "Data: Elpriset just nu.se. Answer in the user's language (usually Swedish).",
+        "Data: Elpriset just nu.se; grid fees: Energimarknadsinspektionen via elprisernaidag.se. Answer in the user's language (usually Swedish).",
     },
   );
   const client = new ElprisClient(env.ELPRIS_BASE_URL);
+  const grid = new GridClient(env.GRID_BASE_URL, env.ELPRISERNAIDAG_KEY, env.FEEDBACK);
+
+  /**
+   * The user's fee settings, with the variable grid fee filled in from their grid company when they named one.
+   * Returns the settings to price with, what the lookup found, and what still isn't included.
+   */
+  async function feeSettings(args: CostSettings & { grid_company?: string; grid_customer_type?: string }, year: number) {
+    const costs = pickCosts(args);
+    if (!args.grid_company) {
+      return { costs, grid: undefined, notIncluded: [...missingParts(costs), NOT_INCLUDED_ALWAYS] };
+    }
+    const { companies } = await grid.overview();
+    const found = resolveCompany(companies, args.grid_company);
+    if (!("company" in found)) {
+      throw new Error(
+        found.candidates.length
+          ? `Several grid companies match "${args.grid_company}": ${companyList(found.candidates)}. Ask the user which one, then call again with grid_company set to its slug.`
+          : `No grid company matches "${args.grid_company}". Ask the user for the name on their grid bill (elnätsfaktura), or search with get_grid_fees.`,
+      );
+    }
+    const detail = await grid.company(found.company.slug);
+    const customer = detail && pickCustomer(detail, args.grid_customer_type, found.company.reference?.customer);
+    const picked = customer && feeForYear(customer, year);
+    if (!detail || !customer || !picked) {
+      throw new Error(`There are no grid fees for ${found.company.name} in the data. Ask the user for the överföringsavgift and use grid_fee_ore.`);
+    }
+    const excl = picked.fee.rorlig_ore_per_kwh!;
+    const own = costs.grid_fee_ore !== undefined || costs.grid_fee_percent_of_spot !== undefined;
+    const merged: CostSettings = own ? costs : { ...costs, grid_fee_ore: costs.fees_include_vat === false ? excl : excl * (1 + VAT) };
+    const fixedIncl = ((picked.fee.fast_kr_per_ar ?? 0) + (picked.fee.myndighetsavgift_kr_per_ar ?? 0)) * (1 + VAT);
+    return {
+      costs: merged,
+      grid: {
+        company: detail.name,
+        slug: detail.slug,
+        customer_type: customer.label,
+        year: Number(picked.year) === year ? picked.year : `${picked.year} (latest in the data)`,
+        variable_fee_ore_per_kwh_incl_vat: round1(excl * (1 + VAT)),
+        variable_fee_ore_per_kwh_excl_vat: round1(excl),
+        fixed_fees_kr_per_year_incl_vat: fixedIncl ? round0(fixedIncl) : undefined,
+        used: own ? "Not used for the price: the grid_fee you gave was used instead." : "Used as the grid fee per kWh.",
+        notes: detail.limitations?.length ? detail.limitations : undefined,
+        source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
+      },
+      notIncluded: [
+        ...missingParts(merged),
+        fixedIncl
+          ? `${detail.name}'s fixed fees, about ${round0(fixedIncl)} kr/year (${round0(fixedIncl / 12)} kr/month) incl. VAT, and any power fee (effektavgift)`
+          : "the grid company's fixed fees and any power fee (effektavgift)",
+        "the electricity supplier's monthly fee",
+      ],
+    };
+  }
   const now = () => (env.NOW_OVERRIDE ? Date.parse(env.NOW_OVERRIDE) : Date.now());
 
   /** Quarters for consecutive local days, stopping at the first day not yet published. */
@@ -208,9 +292,10 @@ export function buildServer(env: ToolEnv): McpServer {
     },
     async ({ area: a, minutes, earliest, latest, together, kwh, include_vat, ...rest }) =>
       run(async () => {
-        const costs = pickCosts(rest);
-        const withCosts = hasCostSettings(costs);
         const t = now();
+        const fees = await feeSettings(rest, Number(localDate(t).slice(0, 4)));
+        const costs = fees.costs;
+        const withCosts = hasCostSettings(costs);
         const vat = include_vat ?? false;
         const from = earliest ? parseLocal(earliest, t) : t;
         const to = latest ? parseLocal(latest, from) : Infinity;
@@ -251,7 +336,8 @@ export function buildServer(env: ToolEnv): McpServer {
             average_ore: ore(found.sek, vat),
             spot_cost_kr: cost(found.sek),
             with_your_fees: real({ start: found.runs[0]!.start, sek: found.sek }),
-            not_included: withCosts ? [...missingParts(costs), NOT_INCLUDED_ALWAYS] : undefined,
+            grid_fee_lookup: fees.grid,
+            not_included: withCosts ? fees.notIncluded : undefined,
             source: SOURCE,
           };
         }
@@ -272,7 +358,8 @@ export function buildServer(env: ToolEnv): McpServer {
             ? { ...describeWindow(startNow, vat, t), spot_cost_kr: cost(startNow.sek), with_your_fees: real(startNow), cheapest_saves: saving(startNow) }
             : undefined,
           most_expensive: { ...describeWindow(worst, vat, t), with_your_fees: real(worst), cheapest_saves: saving(worst) },
-          not_included: withCosts ? [...missingParts(costs), NOT_INCLUDED_ALWAYS] : undefined,
+          grid_fee_lookup: fees.grid,
+          not_included: withCosts ? fees.notIncluded : undefined,
           rounded_to: found.windowMinutes !== minutes ? `${found.windowMinutes} minutes (prices come per ${found.slotMinutes} minutes)` : undefined,
           tomorrow_published: lastPublished !== undefined && lastPublished > localDate(t),
           source: SOURCE,
@@ -286,12 +373,12 @@ export function buildServer(env: ToolEnv): McpServer {
       title: "What electricity really costs",
       description:
         "The real price per kWh incl. VAT: spot price + energy tax (36.0 öre/kWh excl. VAT in 2026, Skatteverket) + VAT, " +
-        "plus the user's grid transfer fee and supplier markup when given. Shows the breakdown right now (or at a given " +
-        "time) and the day's average, lowest and highest total. For the full price, ask the user for their " +
-        "överföringsavgift (öre/kWh, on the grid bill or the grid company's price list) and their supplier's påslag; " +
-        "without them the answer covers spot + energy tax + VAT and lists what's missing. Spot-indexed grid tariffs " +
-        "(a fixed part plus a percent of the spot price) use grid_fee_percent_of_spot. Fixed monthly fees and " +
-        "effektavgift are never included.",
+        "plus the grid fee and the supplier's markup. Shows the breakdown right now (or at a given time) and the day's " +
+        "average, lowest and highest total. For the grid fee, set grid_company to the user's grid company (looked up " +
+        "from Energimarknadsinspektionen's data) or grid_fee_ore if they know their överföringsavgift. Ask for the " +
+        "supplier's påslag; without it the answer lists what's missing. Spot-indexed grid tariffs (a fixed part plus a " +
+        "percent of the spot price) use grid_fee_percent_of_spot. Fixed fees and effektavgift aren't per kWh and are " +
+        "listed separately.",
       inputSchema: z.object({
         area,
         date: date.optional(),
@@ -303,11 +390,12 @@ export function buildServer(env: ToolEnv): McpServer {
     async ({ area: a, date: d, at, ...rest }) =>
       run(async () => {
         const t = now();
-        const costs = pickCosts(rest);
         const day = d ?? localDate(t);
         const qs = await client.day(a, day);
         if (!qs) return notPublished(a, day, t);
         const year = Number(day.slice(0, 4));
+        const fees = await feeSettings(rest, year);
+        const costs = fees.costs;
         const tax = energyTax(year, costs.northern_tax_reduction);
 
         let moment: Quarter | undefined;
@@ -336,8 +424,87 @@ export function buildServer(env: ToolEnv): McpServer {
           },
           spot_share_of_average: avg.total > 0 ? `${Math.round((avg.spot / avg.total) * 100)} %` : undefined,
           energy_tax_rate: `${tax.ore} öre/kWh excl. VAT for ${year}${costs.northern_tax_reduction ? " (with the northern reduction)" : ""}${tax.assumed ? " (assumed: latest known rate)" : ""}`,
-          not_included: [...missingParts(costs), NOT_INCLUDED_ALWAYS],
-          source: `${SOURCE}; energy tax: Skatteverket`,
+          grid_fee_lookup: fees.grid,
+          not_included: fees.notIncluded,
+          source: `${SOURCE}; energy tax: Skatteverket${fees.grid ? `; grid fees: ${GRID_SOURCE}` : ""}`,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_grid_fees",
+    {
+      title: "Grid fees for a grid company",
+      description:
+        "Grid fees (elnätsavgifter) for a Swedish grid company from Energimarknadsinspektionen: the fixed fee per year, the " +
+        "variable fee per kWh and the total per year for standard customers (apartment, houses with different fuses and use), " +
+        "and how the company compares with the national median. Search by company name or the town it serves. If several " +
+        "companies match, the answer lists them so you can ask the user which one is on their grid bill. To use the fee in a " +
+        "price, pass grid_company to get_total_price or find_cheapest_time.",
+      inputSchema: z.object({
+        company: z.string().min(2).max(80).describe("Grid company name, part of it, a town it serves, or a slug"),
+        customer_type: z.string().max(60).optional().describe("Only this standard customer, e.g. 'lägenhet', 'villa 20 A'"),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ company, customer_type }) =>
+      run(async () => {
+        const { companies, median_kr_per_year_incl_vat } = await grid.overview();
+        const found = resolveCompany(companies, company);
+        if (!("company" in found)) {
+          return {
+            matches: found.candidates.map((c) => ({
+              name: c.name,
+              slug: c.slug,
+              area: c.area ?? undefined,
+              reference_total_kr_per_year_incl_vat: c.reference?.total_kr_per_year_incl_vat,
+            })),
+            message: found.candidates.length
+              ? "Several grid companies match. Ask the user which one is on their grid bill, then call again with its slug."
+              : "No grid company matches. Ask for the name on the user's grid bill (elnätsfaktura). It's often not the electricity supplier.",
+            source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
+          };
+        }
+        const detail = await grid.company(found.company.slug);
+        if (!detail) throw new Error(`No grid fees were found for ${found.company.name}.`);
+        const year = Number(localDate(now()).slice(0, 4));
+        const only = customer_type ? pickCustomer(detail, customer_type) : undefined;
+        const customers = (only ? [only] : detail.customers).flatMap((c) => {
+          const picked = feeForYear(c, year);
+          if (!picked) return [];
+          const f = picked.fee;
+          const fixed = (f.fast_kr_per_ar ?? 0) + (f.myndighetsavgift_kr_per_ar ?? 0);
+          return [
+            {
+              customer_type: c.label,
+              year: picked.year,
+              variable_fee_ore_per_kwh_incl_vat: round1(f.rorlig_ore_per_kwh! * (1 + VAT)),
+              fixed_fees_kr_per_year_incl_vat: round0(fixed * (1 + VAT)),
+              total_kr_per_year_incl_vat: f.totalt_kr_per_ar_inkl_moms ?? (f.totalt_kr_per_ar !== undefined ? round0(f.totalt_kr_per_ar * (1 + VAT)) : undefined),
+              change_from_last_year_percent: c.change_percent,
+            },
+          ];
+        });
+        const m = detail.vs_median;
+        return {
+          company: detail.name,
+          slug: detail.slug,
+          legal_name: detail.legal_name,
+          area: detail.area ?? undefined,
+          customer_types: customers,
+          compared_with_median: m
+            ? {
+                customer_type: m.customer,
+                year: m.year,
+                difference_kr_per_year_incl_vat: m.difference_kr_per_year_incl_vat,
+                difference_percent: m.difference_percent,
+                national_median_kr_per_year_incl_vat: median_kr_per_year_incl_vat,
+              }
+            : undefined,
+          vat_note: detail.vat_note,
+          notes: detail.limitations?.length ? detail.limitations : undefined,
+          more: detail.page,
+          source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
         };
       }),
   );

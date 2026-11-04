@@ -5,12 +5,13 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import assert from "node:assert/strict";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { dayJson } from "./fixtures.mjs";
+import { dayJson, gridCompany, gridOverview } from "./fixtures.mjs";
 
 const WORKER = "http://127.0.0.1:8788";
 const LAST_PUBLISHED = "2026-11-04"; // "now" is 2026-11-03 20:10, after 13:00, so tomorrow is out
 const calls = [];
 const pushes = [];
+const gridCalls = [];
 
 const api = createServer((req, res) => {
   if (req.url.startsWith("/ntfy/")) {
@@ -21,6 +22,13 @@ const api = createServer((req, res) => {
       res.writeHead(200).end("{}");
     });
     return;
+  }
+  if (req.url.startsWith("/grid/")) {
+    gridCalls.push(req.url);
+    const g = /^\/grid\/v1\/elnatsavgifter(?:\/([a-z0-9-]+))?$/.exec(req.url);
+    const body = g ? (g[1] ? gridCompany(g[1]) : gridOverview()) : null;
+    if (!body) return res.writeHead(404, { "Content-Type": "application/json" }).end('{"fel":"Okänt nätbolag"}');
+    return res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(body));
   }
   calls.push(req.url);
   const m = /^\/api\/v1\/prices\/(\d{4})\/(\d{2})-(\d{2})_(SE[1-4])\.json$/.exec(req.url);
@@ -69,7 +77,7 @@ try {
     const client = new Client({ name: "e2e", version: "1" }, { versionNegotiation: { mode } });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${WORKER}/mcp`)));
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices", "get_total_price", "send_feedback"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_grid_fees", "get_prices", "get_total_price", "send_feedback"]);
     assert.ok(tools.filter((t) => t.name !== "send_feedback").every((t) => t.annotations?.readOnlyHint === true));
     assert.equal(tools.find((t) => t.name === "send_feedback").annotations.readOnlyHint, false);
     assert.ok(tools.every((t) => t.title || t.annotations?.title));
@@ -129,6 +137,44 @@ try {
     const dishTotal = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2, grid_fee_ore: 25, supplier_markup_ore: 6 });
     assert.ok(dishTotal.cheapest.with_your_fees.total_cost_kr > dishTotal.cheapest.spot_cost_kr);
     assert.ok(dishTotal.if_started_at_earliest.with_your_fees.total_cost_kr > dishTotal.cheapest.with_your_fees.total_cost_kr);
+
+    // Grid company lookup (fake Ei data: Ellevio villa 20 A = 20 öre excl. VAT, 5000 + 100 kr/year fixed)
+    const ellevio = await call("get_total_price", { area: "SE3", grid_company: "Ellevio", supplier_markup_ore: 6 });
+    assert.equal(ellevio.at.grid_fee, 25);
+    assert.equal(ellevio.at.total, 192.3);
+    assert.equal(ellevio.grid_fee_lookup.company, "Ellevio");
+    assert.equal(ellevio.grid_fee_lookup.customer_type, "Villa, 20 A, 20 000 kWh/år");
+    assert.equal(ellevio.grid_fee_lookup.year, "2026");
+    assert.equal(ellevio.grid_fee_lookup.fixed_fees_kr_per_year_incl_vat, 6375);
+    assert.ok(ellevio.not_included.some((x) => /Ellevio's fixed fees, about 6375 kr\/year \(531 kr\/month\)/.test(x)));
+    assert.match(ellevio.source, /Energimarknadsinspektionen/);
+    const flat = await call("get_total_price", { area: "SE3", grid_company: "ellevio", grid_customer_type: "lägenhet" });
+    assert.equal(flat.at.grid_fee, 37.5);
+    assert.equal(flat.not_included.length, 3); // markup, Ellevio's fixed fees, supplier's monthly fee
+    const own = await call("get_total_price", { area: "SE3", grid_company: "Göteborg", grid_fee_ore: 10 });
+    assert.equal(own.at.grid_fee, 10);
+    assert.match(own.grid_fee_lookup.used, /Not used/);
+    const lastYear = await call("get_total_price", { area: "SE3", date: "2025-11-03", grid_company: "Ellevio" });
+    assert.equal(lastYear.at, undefined);
+    assert.equal(lastYear.grid_fee_lookup.variable_fee_ore_per_kwh_excl_vat, 18);
+    assert.match((await call("get_total_price", { area: "SE3", grid_company: "Energi" })).error, /Several grid companies match "Energi"/);
+    assert.match((await call("get_total_price", { area: "SE3", grid_company: "Tekniska verken" })).error, /No grid company matches/);
+    const dishEllevio = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2, grid_company: "Ellevio", supplier_markup_ore: 6 });
+    assert.deepEqual(dishEllevio.cheapest.with_your_fees, dishTotal.cheapest.with_your_fees);
+    assert.equal(dishEllevio.grid_fee_lookup.slug, "ellevio");
+    const gbg = await call("get_grid_fees", { company: "goteborg energi" });
+    assert.equal(gbg.company, "Göteborg Energi Nät");
+    assert.equal(gbg.customer_types.length, 3);
+    assert.deepEqual(gbg.customer_types[2], {
+      customer_type: "Villa, 20 A, 20 000 kWh/år", year: "2026", variable_fee_ore_per_kwh_incl_vat: 18.8,
+      fixed_fees_kr_per_year_incl_vat: 5125, total_kr_per_year_incl_vat: 8875, change_from_last_year_percent: 4.2,
+    });
+    assert.equal(gbg.compared_with_median.national_median_kr_per_year_incl_vat, 13000);
+    const several = await call("get_grid_fees", { company: "energi" });
+    assert.ok(several.matches.length >= 2);
+    assert.equal((await call("get_grid_fees", { company: "Vattenfall", customer_type: "villa 16 A" })).customer_types.length, 1);
+    if (mode === "legacy") console.log("  grid lookup:", JSON.stringify(ellevio.grid_fee_lookup));
+
     if (mode === "legacy") console.log("  total price now:", JSON.stringify(total.at), "| dishwasher with fees:", JSON.stringify(dishTotal.cheapest.with_your_fees));
 
     const areas = await call("compare_areas", {});
@@ -190,6 +236,9 @@ try {
   const unique = new Set(calls);
   assert.equal(unique.size + calls.filter((c) => c.includes("11-05")).length - 1, calls.length);
   console.log(`price API calls: ${calls.length} (${unique.size} unique)`);
+  // Grid data is cached (memory + KV): the list and each company fetched once.
+  assert.equal(new Set(gridCalls).size, gridCalls.length, `grid calls: ${gridCalls.join(", ")}`);
+  console.log(`grid API calls: ${gridCalls.length}`);
   console.log("E2E PASSED");
 } catch (error) {
   failed = true;

@@ -13,6 +13,7 @@
     "NTFY_URL": "http://127.0.0.1:8798/ntfy",
     "PUBLIC_URL": "https://elpriskollen.example",
     "ELPRIS_BASE_URL": "http://127.0.0.1:8798",
+    "GRID_BASE_URL": "http://127.0.0.1:8798/grid",
     "NOW_OVERRIDE": "2026-11-03T20:10:00+01:00",
     "DONATE_URL": "https://buy.stripe.com/test_beer",
     "REPO_URL": "https://github.com/carlindgren/elpriskollen"
