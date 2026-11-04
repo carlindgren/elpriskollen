@@ -164,6 +164,14 @@ try {
     assert.match(taby.grid_fee_lookup.warning, /after 2022/);
     assert.match(taby.grid_fee_lookup.warning, /current figures: Ellevio \(ellevio\)/);
     assert.equal(ellevio.grid_fee_lookup.warning, undefined);
+    const partille = await call("get_total_price", { area: "SE3", grid_company: "Partille" });
+    assert.equal(partille.at.grid_fee, 37.5);
+    assert.equal(partille.grid_fee_lookup.customer_type, "Lägenhet, 16 A, 2 000 kWh/år");
+    assert.match(partille.grid_fee_lookup.warning, /no fee per kWh for "Villa, 20 A, 20 000 kWh\/år" at Partille Energi Nät/);
+    const partilleFees = await call("get_grid_fees", { company: "Partille" });
+    assert.equal(partilleFees.customer_types.length, 3);
+    assert.match(partilleFees.customer_types[2].note, /power-based tariff/);
+    assert.match((await call("get_grid_fees", { company: "Partille", customer_type: "villa" })).asked_for_missing, /has no fee per kWh/);
     const malar = await call("get_total_price", { area: "SE3", grid_company: "Mälarenergi" });
     assert.equal(malar.grid_fee_lookup.year, "2024 (latest in the data)");
     assert.match(malar.grid_fee_lookup.warning, /after 2024\. The company may have moved to a power-based tariff/);

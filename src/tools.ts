@@ -159,7 +159,8 @@ export function buildServer(env: ToolEnv): McpServer {
       );
     };
     const detail = await grid.company(found.company.slug);
-    const customer = detail && pickCustomer(detail, args.grid_customer_type, found.company.reference?.customer);
+    const choice = detail && pickCustomer(detail, args.grid_customer_type, found.company.reference?.customer);
+    const customer = choice?.customer;
     const picked = customer && feeForYear(customer, year);
     if (!detail || !customer || !picked) {
       throw new Error(`There are no grid fees for ${found.company.name} in the data. Ask the user for the överföringsavgift and use grid_fee_ore.`);
@@ -179,7 +180,17 @@ export function buildServer(env: ToolEnv): McpServer {
         variable_fee_ore_per_kwh_excl_vat: round1(excl),
         fixed_fees_kr_per_year_incl_vat: fixedIncl ? round0(fixedIncl) : undefined,
         used: own ? "Not used for the price: the grid_fee you gave was used instead." : "Used as the grid fee per kWh.",
-        warning: Number(picked.year) < year - 1 ? staleWarning(found.company, picked.year) : undefined,
+        warning:
+          [
+            choice.missing
+              ? `There's no fee per kWh for "${choice.missing}" at ${detail.name} in Energimarknadsinspektionen's data (often because ` +
+                `it has a power-based tariff, effekttariff). The figure is for "${customer.label}" instead, which may not fit the user. ` +
+                "Ask the user for their överföringsavgift and use grid_fee_ore."
+              : "",
+            Number(picked.year) < year - 1 ? staleWarning(found.company, picked.year) : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
         notes: detail.limitations?.length ? detail.limitations : undefined,
         source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
       },
@@ -490,21 +501,19 @@ export function buildServer(env: ToolEnv): McpServer {
         if (!detail) throw new Error(`No grid fees were found for ${found.company.name}.`);
         const year = Number(localDate(now()).slice(0, 4));
         const only = customer_type ? pickCustomer(detail, customer_type) : undefined;
-        const customers = (only ? [only] : detail.customers).flatMap((c) => {
+        const customers = (only ? [only.customer] : detail.customers).map((c) => {
           const picked = feeForYear(c, year);
-          if (!picked) return [];
+          if (!picked) return { customer_type: c.label, note: "No fee per kWh in the data, often because it has a power-based tariff (effekttariff)." };
           const f = picked.fee;
           const fixed = (f.fast_kr_per_ar ?? 0) + (f.myndighetsavgift_kr_per_ar ?? 0);
-          return [
-            {
-              customer_type: c.label,
-              year: picked.year,
-              variable_fee_ore_per_kwh_incl_vat: round1(f.rorlig_ore_per_kwh! * (1 + VAT)),
-              fixed_fees_kr_per_year_incl_vat: round0(fixed * (1 + VAT)),
-              total_kr_per_year_incl_vat: f.totalt_kr_per_ar_inkl_moms ?? (f.totalt_kr_per_ar !== undefined ? round0(f.totalt_kr_per_ar * (1 + VAT)) : undefined),
-              change_from_last_year_percent: c.change_percent,
-            },
-          ];
+          return {
+            customer_type: c.label,
+            year: picked.year,
+            variable_fee_ore_per_kwh_incl_vat: round1(f.rorlig_ore_per_kwh! * (1 + VAT)),
+            fixed_fees_kr_per_year_incl_vat: round0(fixed * (1 + VAT)),
+            total_kr_per_year_incl_vat: f.totalt_kr_per_ar_inkl_moms ?? (f.totalt_kr_per_ar !== undefined ? round0(f.totalt_kr_per_ar * (1 + VAT)) : undefined),
+            change_from_last_year_percent: c.change_percent,
+          };
         });
         const m = detail.vs_median;
         return {
@@ -517,6 +526,7 @@ export function buildServer(env: ToolEnv): McpServer {
           legal_name: detail.legal_name,
           area: detail.area ?? undefined,
           customer_types: customers,
+          asked_for_missing: only?.missing ? `"${only.missing}" has no fee per kWh in the data; showing "${only.customer.label}" instead.` : undefined,
           compared_with_median: m
             ? {
                 customer_type: m.customer,

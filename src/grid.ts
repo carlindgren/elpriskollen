@@ -272,31 +272,36 @@ export function resolveCompany(companies: GridCompany[], query: string): Resolve
   return { candidates: [...current, ...hits.filter((c) => c.latest_year !== newest)].slice(0, 15) };
 }
 
-/** The standard customer that best matches the user's words, or the reference customer (villa 20 A, 20 000 kWh). */
-export function pickCustomer(detail: GridDetail, wanted?: string, reference?: string): CustomerType | undefined {
-  const usable = detail.customers.filter((c) => Object.keys(c.years).length);
-  if (!usable.length) return undefined;
-  const byWords = (text: string) => {
+const hasFee = (c: CustomerType) => Object.values(c.years).some((f) => f.rorlig_ore_per_kwh !== undefined);
+
+/**
+ * The standard customer that best matches the user's words, else the reference customer (villa 20 A, 20 000 kWh).
+ * When that one has no fee per kWh in the data (often a power tariff), the closest one that has is used and
+ * `missing` names the one that was wanted.
+ */
+export function pickCustomer(detail: GridDetail, wanted?: string, reference?: string): { customer: CustomerType; missing?: string } | undefined {
+  const byWords = (list: CustomerType[], text: string) => {
     const w = words(text);
     let best: CustomerType | undefined;
     let bestScore = 0;
-    for (const c of usable) {
+    for (const c of list) {
       const tokens = normalize(`${c.id} ${c.label}`).split(" ");
       const score = w.filter((x) => tokens.some((t) => t === x || t.startsWith(x))).length;
       if (score > bestScore) [best, bestScore] = [c, score];
     }
     return best;
   };
-  if (wanted) {
-    const found = byWords(wanted);
-    if (found) return found;
-  }
-  if (reference) {
-    const r = normalize(reference);
-    const found = usable.find((c) => normalize(c.id) === r || normalize(c.label) === r);
-    if (found) return found;
-  }
-  return byWords("villa 20") ?? usable[0];
+  const all = detail.customers;
+  const usable = all.filter(hasFee);
+  if (!usable.length) return undefined;
+  const ref = reference ? normalize(reference) : undefined;
+  const target =
+    (wanted ? byWords(all, wanted) : undefined) ??
+    (ref ? all.find((c) => normalize(c.id) === ref || normalize(c.label) === ref) : undefined) ??
+    byWords(all, "villa 20");
+  if (target && hasFee(target)) return { customer: target };
+  const instead = byWords(usable, wanted ?? "villa 20") ?? usable[usable.length - 1]!;
+  return { customer: instead, missing: target?.label };
 }
 
 /** The fee for the given year, or the latest year before it (fees are set per calendar year). */

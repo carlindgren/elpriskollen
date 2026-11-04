@@ -82,6 +82,8 @@ const COMPANIES = [
   // An old grid area with no recent figures, like several of the big companies have.
   // A current area whose fee per kWh stops in 2024 (moved to a power tariff).
   { slug: "malarenergi-elnat", namn: "Mälarenergi Elnät", juridiskt_namn: "Mälarenergi Elnät AB", omrade: "Västerås", variable: [26, 24, 22], fixed: [1600, 2700, 4500], years: ["2023", "2024"], latest: "2026" },
+  // Houses on a power tariff: only the apartment has a fee per kWh (like Göteborg Energi in the real data).
+  { slug: "partille-energi-nat", namn: "Partille Energi Nät", juridiskt_namn: "Partille Energi Nät AB", omrade: "Partille", variable: [30, 0, 0], fixed: [1500, 0, 0], onlyFlat: true },
   { slug: "ellevio-ab-f-d-taby", namn: "Ellevio AB – f.d. Täby", juridiskt_namn: "Ellevio AB", omrade: "Stockholm", variable: [28, 21, 19], fixed: [1700, 2900, 4800], years: ["2021", "2022"] },
 ];
 const annual = (fixed, variable, kwh) => {
@@ -129,7 +131,7 @@ export function gridCompany(slug) {
       typkund,
       etikett,
       forandring: { fran_ar: "2025", till_ar: "2026", procent: 4.2 },
-      ar: {
+      ar: c.onlyFlat && i > 0 ? {} : {
         [(c.years ?? ["2025", "2026"])[0]]: annual(c.fixed[i] - 100, c.variable[i] - 2, KWH[i]),
         [(c.years ?? ["2025", "2026"])[1]]: annual(c.fixed[i], c.variable[i], KWH[i]),
       },

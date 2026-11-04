@@ -44,19 +44,24 @@ describe("grid companies", () => {
 
   it("picks the standard customer and the year", async () => {
     const detail = (await new GridClient("https://x", undefined, undefined, fakeFetch([])).company("ellevio"))!;
-    expect(pickCustomer(detail, "lägenhet")!.id).toBe("lagenhet-16a-2000");
-    expect(pickCustomer(detail, "villa 16 A")!.id).toBe("villa-16a-5000");
-    expect(pickCustomer(detail, undefined, "villa-20a-20000")!.id).toBe("villa-20a-20000");
-    expect(pickCustomer(detail, undefined, "Villa, 20 A, 20 000 kWh/år")!.id).toBe("villa-20a-20000");
-    expect(pickCustomer(detail)!.id).toBe("villa-20a-20000"); // no reference: still the 20 A house, not the first one
+    expect(pickCustomer(detail, "lägenhet")!.customer.id).toBe("lagenhet-16a-2000");
+    expect(pickCustomer(detail, "villa 16 A")!.customer.id).toBe("villa-16a-5000");
+    expect(pickCustomer(detail, undefined, "villa-20a-20000")!.customer.id).toBe("villa-20a-20000");
+    expect(pickCustomer(detail, undefined, "Villa, 20 A, 20 000 kWh/år")!.customer.id).toBe("villa-20a-20000");
+    expect(pickCustomer(detail)!.customer.id).toBe("villa-20a-20000"); // no reference: still the 20 A house, not the first one
     const real = { ...detail, customers: [
-      { id: "Lägenhet 16A, 2 000 kWh/år", label: "Lägenhet 16A, 2 000 kWh/år", years: { 2026: {} } },
-      { id: "Villa 16A, 5 000 kWh/år", label: "Villa 16A, 5 000 kWh/år", years: { 2026: {} } },
-      { id: "Villa 20A, 20 000 kWh/år", label: "Villa 20A, 20 000 kWh/år", years: { 2026: {} } },
+      { id: "Lägenhet 16A, 2 000 kWh/år", label: "Lägenhet 16A, 2 000 kWh/år", years: { 2026: { rorlig_ore_per_kwh: 30 } } },
+      { id: "Villa 16A, 5 000 kWh/år", label: "Villa 16A, 5 000 kWh/år", years: { 2026: { rorlig_ore_per_kwh: 25 } } },
+      { id: "Villa 20A, 20 000 kWh/år", label: "Villa 20A, 20 000 kWh/år", years: { 2026: { rorlig_ore_per_kwh: 20 } } },
     ] };
-    expect(pickCustomer(real, undefined, "something else")!.label).toBe("Villa 20A, 20 000 kWh/år");
-    expect(pickCustomer(real, "villa 16")!.label).toBe("Villa 16A, 5 000 kWh/år");
-    const villa = pickCustomer(detail, "villa 20")!;
+    expect(pickCustomer(real, undefined, "something else")!.customer.label).toBe("Villa 20A, 20 000 kWh/år");
+    expect(pickCustomer(real, "villa 16")!.customer.label).toBe("Villa 16A, 5 000 kWh/år");
+    // Like Göteborg Energi: houses have a power tariff, only the apartment has a fee per kWh.
+    const onlyFlat = { ...real, customers: real.customers.map((c, i) => (i ? { ...c, years: { 2026: {} } } : c)) };
+    expect(pickCustomer(onlyFlat)).toEqual({ customer: onlyFlat.customers[0], missing: "Villa 20A, 20 000 kWh/år" });
+    expect(pickCustomer(onlyFlat, "villa 16")!.missing).toBe("Villa 16A, 5 000 kWh/år");
+    expect(pickCustomer(onlyFlat, "lägenhet")!.missing).toBeUndefined();
+    const villa = pickCustomer(detail, "villa 20")!.customer;
     expect(feeForYear(villa, 2026)).toMatchObject({ year: "2026", fee: { rorlig_ore_per_kwh: 20 } });
     expect(feeForYear(villa, 2025)!.fee.rorlig_ore_per_kwh).toBe(18);
     expect(feeForYear(villa, 2027)!.year).toBe("2026");
