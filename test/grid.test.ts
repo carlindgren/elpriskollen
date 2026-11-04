@@ -61,6 +61,11 @@ describe("grid companies", () => {
     expect(pickCustomer(onlyFlat)).toEqual({ customer: onlyFlat.customers[0], missing: "Villa 20A, 20 000 kWh/år" });
     expect(pickCustomer(onlyFlat, "villa 16")!.missing).toBe("Villa 16A, 5 000 kWh/år");
     expect(pickCustomer(onlyFlat, "lägenhet")!.missing).toBeUndefined();
+    // Like Göteborg Energi in the real data: the house types aren't listed at all.
+    const flatOnly = { ...real, customers: [real.customers[0]!] };
+    expect(pickCustomer(flatOnly)!.missing).toBe("Villa 20 A, 20 000 kWh/år");
+    expect(pickCustomer(flatOnly, "villa 16 A")!.missing).toBe("villa 16 A");
+    expect(pickCustomer(flatOnly, "lägenhet")!.missing).toBeUndefined();
     const villa = pickCustomer(detail, "villa 20")!.customer;
     expect(feeForYear(villa, 2026)).toMatchObject({ year: "2026", fee: { rorlig_ore_per_kwh: 20 } });
     expect(feeForYear(villa, 2025)!.fee.rorlig_ore_per_kwh).toBe(18);

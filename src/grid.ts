@@ -301,7 +301,7 @@ export function pickCustomer(detail: GridDetail, wanted?: string, reference?: st
     byWords(all, "villa 20");
   if (target && hasFee(target)) return { customer: target };
   const instead = byWords(usable, wanted ?? "villa 20") ?? usable[usable.length - 1]!;
-  return { customer: instead, missing: target?.label };
+  return { customer: instead, missing: target?.label ?? wanted ?? "Villa 20 A, 20 000 kWh/år" };
 }
 
 /** The fee for the given year, or the latest year before it (fees are set per calendar year). */
