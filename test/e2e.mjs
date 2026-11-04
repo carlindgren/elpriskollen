@@ -161,9 +161,12 @@ try {
     assert.match((await call("get_total_price", { area: "SE3", grid_company: "Tekniska verken" })).error, /No grid company matches/);
     const taby = await call("get_total_price", { area: "SE3", grid_company: "Täby" });
     assert.equal(taby.grid_fee_lookup.year, "2022 (latest in the data)");
-    assert.match(taby.grid_fee_lookup.warning, /from 2022/);
+    assert.match(taby.grid_fee_lookup.warning, /after 2022/);
     assert.match(taby.grid_fee_lookup.warning, /current figures: Ellevio \(ellevio\)/);
     assert.equal(ellevio.grid_fee_lookup.warning, undefined);
+    const malar = await call("get_total_price", { area: "SE3", grid_company: "Mälarenergi" });
+    assert.equal(malar.grid_fee_lookup.year, "2024 (latest in the data)");
+    assert.match(malar.grid_fee_lookup.warning, /after 2024\. The company may have moved to a power-based tariff/);
     const dishEllevio = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2, grid_company: "Ellevio", supplier_markup_ore: 6 });
     assert.deepEqual(dishEllevio.cheapest.with_your_fees, dishTotal.cheapest.with_your_fees);
     assert.equal(dishEllevio.grid_fee_lookup.slug, "ellevio");

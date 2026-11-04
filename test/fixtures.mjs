@@ -80,6 +80,8 @@ const COMPANIES = [
   { slug: "borlange-energi-elnat", namn: "Borlänge Energi Elnät", juridiskt_namn: "Borlänge Energi Elnät AB", omrade: "Borlänge", variable: [25, 24, 23], fixed: [1600, 2600, 4200] },
   { slug: "eon-energidistribution", namn: "E.ON Energidistribution", juridiskt_namn: "E.ON Energidistribution AB", omrade: null, variable: [45, 40, 35], fixed: [2100, 3600, 6500] },
   // An old grid area with no recent figures, like several of the big companies have.
+  // A current area whose fee per kWh stops in 2024 (moved to a power tariff).
+  { slug: "malarenergi-elnat", namn: "Mälarenergi Elnät", juridiskt_namn: "Mälarenergi Elnät AB", omrade: "Västerås", variable: [26, 24, 22], fixed: [1600, 2700, 4500], years: ["2023", "2024"], latest: "2026" },
   { slug: "ellevio-ab-f-d-taby", namn: "Ellevio AB – f.d. Täby", juridiskt_namn: "Ellevio AB", omrade: "Stockholm", variable: [28, 21, 19], fixed: [1700, 2900, 4800], years: ["2021", "2022"] },
 ];
 const annual = (fixed, variable, kwh) => {
@@ -102,7 +104,7 @@ export function gridOverview() {
       namn: c.namn,
       juridiskt_namn: c.juridiskt_namn,
       omrade: c.omrade,
-      senaste_ar: (c.years ?? ["2025", "2026"])[1],
+      senaste_ar: c.latest ?? (c.years ?? ["2025", "2026"])[1],
       antal_typkunder: 3,
       referens: { typkund: "villa-20a-20000", ar: (c.years ?? ["2025", "2026"])[1], ...annual(c.fixed[2], c.variable[2], 20000) },
       detalj: `https://api.elprisernaidag.se/v1/elnatsavgifter/${c.slug}`,
@@ -120,7 +122,7 @@ export function gridCompany(slug) {
     namn: c.namn,
     juridiskt_namn: c.juridiskt_namn,
     omrade: c.omrade,
-    senaste_ar: (c.years ?? ["2025", "2026"])[1],
+    senaste_ar: c.latest ?? (c.years ?? ["2025", "2026"])[1],
     moms_not: "Belopp är exklusive moms om inte fältet heter inkl_moms.",
     mot_median: { typkund: "villa-20a-20000", ar: "2026", skillnad_kr_per_ar_inkl_moms: -500, skillnad_procent: -3.8 },
     typkunder: CUSTOMERS.map(([typkund, etikett], i) => ({

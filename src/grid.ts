@@ -272,12 +272,12 @@ export function resolveCompany(companies: GridCompany[], query: string): Resolve
   return { candidates: [...current, ...hits.filter((c) => c.latest_year !== newest)].slice(0, 15) };
 }
 
-/** The standard customer that best matches the user's words, or the reference customer. */
+/** The standard customer that best matches the user's words, or the reference customer (villa 20 A, 20 000 kWh). */
 export function pickCustomer(detail: GridDetail, wanted?: string, reference?: string): CustomerType | undefined {
   const usable = detail.customers.filter((c) => Object.keys(c.years).length);
   if (!usable.length) return undefined;
-  if (wanted) {
-    const w = words(wanted);
+  const byWords = (text: string) => {
+    const w = words(text);
     let best: CustomerType | undefined;
     let bestScore = 0;
     for (const c of usable) {
@@ -285,9 +285,18 @@ export function pickCustomer(detail: GridDetail, wanted?: string, reference?: st
       const score = w.filter((x) => tokens.some((t) => t === x || t.startsWith(x))).length;
       if (score > bestScore) [best, bestScore] = [c, score];
     }
-    if (best) return best;
+    return best;
+  };
+  if (wanted) {
+    const found = byWords(wanted);
+    if (found) return found;
   }
-  return usable.find((c) => c.id === reference) ?? usable.find((c) => c.label === reference) ?? usable[0];
+  if (reference) {
+    const r = normalize(reference);
+    const found = usable.find((c) => normalize(c.id) === r || normalize(c.label) === r);
+    if (found) return found;
+  }
+  return byWords("villa 20") ?? usable[0];
 }
 
 /** The fee for the given year, or the latest year before it (fees are set per calendar year). */

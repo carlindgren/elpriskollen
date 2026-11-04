@@ -142,10 +142,21 @@ export function buildServer(env: ToolEnv): McpServer {
           : `No grid company matches "${args.grid_company}". Ask the user for the name on their grid bill (elnätsfaktura), or search with get_grid_fees.`,
       );
     }
-    // An old area is often merged into one of the company's current areas.
-    const currentSiblings = (c: GridCompany) => {
-      const same = companies.filter((o) => o.slug !== c.slug && o.legal_name && o.legal_name === c.legal_name && o.latest_year === newest);
-      return same.length ? `The company's grid areas with current figures: ${companyList(same)}. ` : "";
+    const staleWarning = (c: GridCompany, figuresYear: string) => {
+      const ask = "Tell the user, and use grid_fee_ore if they know their current överföringsavgift.";
+      if (c.latest_year && newest && c.latest_year < newest) {
+        // An old area is often merged into one of the company's current areas.
+        const same = companies.filter((o) => o.slug !== c.slug && o.legal_name && o.legal_name === c.legal_name && o.latest_year === newest);
+        return (
+          `There are no figures for this grid area after ${c.latest_year}, so the fee has probably changed. ` +
+          (same.length ? `The company's grid areas with current figures: ${companyList(same)}. ` : "") +
+          ask
+        );
+      }
+      return (
+        `Energimarknadsinspektionen has no fee per kWh for this customer type after ${figuresYear}. The company may have ` +
+        `moved to a power-based tariff (effekttariff), where the fee per kWh is different. ${ask}`
+      );
     };
     const detail = await grid.company(found.company.slug);
     const customer = detail && pickCustomer(detail, args.grid_customer_type, found.company.reference?.customer);
@@ -168,12 +179,7 @@ export function buildServer(env: ToolEnv): McpServer {
         variable_fee_ore_per_kwh_excl_vat: round1(excl),
         fixed_fees_kr_per_year_incl_vat: fixedIncl ? round0(fixedIncl) : undefined,
         used: own ? "Not used for the price: the grid_fee you gave was used instead." : "Used as the grid fee per kWh.",
-        warning:
-          Number(picked.year) < year - 1
-            ? `The newest figures for this grid area are from ${picked.year}, so the fee has probably changed since. ` +
-              currentSiblings(found.company) +
-              "Tell the user, and use grid_fee_ore if they know their current överföringsavgift."
-            : undefined,
+        warning: Number(picked.year) < year - 1 ? staleWarning(found.company, picked.year) : undefined,
         notes: detail.limitations?.length ? detail.limitations : undefined,
         source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
       },
