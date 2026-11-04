@@ -157,8 +157,12 @@ try {
     const lastYear = await call("get_total_price", { area: "SE3", date: "2025-11-03", grid_company: "Ellevio" });
     assert.equal(lastYear.at, undefined);
     assert.equal(lastYear.grid_fee_lookup.variable_fee_ore_per_kwh_excl_vat, 18);
-    assert.match((await call("get_total_price", { area: "SE3", grid_company: "Energi" })).error, /Several grid companies match "Energi"/);
+    assert.match((await call("get_total_price", { area: "SE3", grid_company: "Energi" })).error, /Several grid companies or grid areas match "Energi"/);
     assert.match((await call("get_total_price", { area: "SE3", grid_company: "Tekniska verken" })).error, /No grid company matches/);
+    const taby = await call("get_total_price", { area: "SE3", grid_company: "Täby" });
+    assert.equal(taby.grid_fee_lookup.year, "2022 (latest in the data)");
+    assert.match(taby.grid_fee_lookup.warning, /from 2022/);
+    assert.equal(ellevio.grid_fee_lookup.warning, undefined);
     const dishEllevio = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2, grid_company: "Ellevio", supplier_markup_ore: 6 });
     assert.deepEqual(dishEllevio.cheapest.with_your_fees, dishTotal.cheapest.with_your_fees);
     assert.equal(dishEllevio.grid_fee_lookup.slug, "ellevio");

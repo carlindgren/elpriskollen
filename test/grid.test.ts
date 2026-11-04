@@ -35,6 +35,11 @@ describe("grid companies", () => {
     expect(one("borlange-energi-elnat")).toBe("borlange-energi-elnat");
     expect(one("Energi")).toEqual(expect.arrayContaining(["goteborg-energi-nat", "borlange-energi-elnat"]));
     expect(searchCompanies(companies, "Tekniska verken")).toEqual([]);
+    // Two Ellevio areas in Stockholm, only one with current figures: that one wins.
+    expect(one("Ellevio Stockholm")).toBe("ellevio");
+    expect(one("Täby")).toBe("ellevio-ab-f-d-taby");
+    // "Ellevio AB" is the legal name of both; the current one wins.
+    expect(one("Ellevio AB")).toBe("ellevio");
   });
 
   it("picks the standard customer and the year", async () => {

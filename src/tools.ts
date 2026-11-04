@@ -99,7 +99,9 @@ const pickCosts = (a: CostSettings): CostSettings => ({
   northern_tax_reduction: a.northern_tax_reduction,
 });
 const NOT_INCLUDED_ALWAYS = "fixed monthly fees and power fees (effektavgift), which don't depend on kWh";
-const companyList = (cs: GridCompany[]) => cs.map((c) => `${c.name} (${c.slug})`).join(", ");
+const yearsNote = (c: GridCompany, newest?: string) =>
+  c.latest_year && newest && c.latest_year < newest ? `, figures only until ${c.latest_year}` : "";
+const companyList = (cs: GridCompany[], newest?: string) => cs.map((c) => `${c.name} (${c.slug}${yearsNote(c, newest)})`).join(", ");
 
 export function buildServer(env: ToolEnv): McpServer {
   const server = new McpServer(
@@ -130,12 +132,13 @@ export function buildServer(env: ToolEnv): McpServer {
     if (!args.grid_company) {
       return { costs, grid: undefined, notIncluded: [...missingParts(costs), NOT_INCLUDED_ALWAYS] };
     }
-    const { companies } = await grid.overview();
+    const { companies, latest_year: newest } = await grid.overview();
     const found = resolveCompany(companies, args.grid_company);
     if (!("company" in found)) {
       throw new Error(
         found.candidates.length
-          ? `Several grid companies match "${args.grid_company}": ${companyList(found.candidates)}. Ask the user which one, then call again with grid_company set to its slug.`
+          ? `Several grid companies or grid areas match "${args.grid_company}": ${companyList(found.candidates, newest)}. ` +
+              "Ask the user which one is on their grid bill (or where they live), then call again with grid_company set to its slug."
           : `No grid company matches "${args.grid_company}". Ask the user for the name on their grid bill (elnätsfaktura), or search with get_grid_fees.`,
       );
     }
@@ -160,6 +163,10 @@ export function buildServer(env: ToolEnv): McpServer {
         variable_fee_ore_per_kwh_excl_vat: round1(excl),
         fixed_fees_kr_per_year_incl_vat: fixedIncl ? round0(fixedIncl) : undefined,
         used: own ? "Not used for the price: the grid_fee you gave was used instead." : "Used as the grid fee per kWh.",
+        warning:
+          Number(picked.year) < year - 1
+            ? `The newest figures for this grid area are from ${picked.year}, so the fee has probably changed since. Tell the user, and use grid_fee_ore if they know their current överföringsavgift.`
+            : undefined,
         notes: detail.limitations?.length ? detail.limitations : undefined,
         source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
       },
@@ -449,7 +456,7 @@ export function buildServer(env: ToolEnv): McpServer {
     },
     async ({ company, customer_type }) =>
       run(async () => {
-        const { companies, median_kr_per_year_incl_vat } = await grid.overview();
+        const { companies, median_kr_per_year_incl_vat, latest_year: newest } = await grid.overview();
         const found = resolveCompany(companies, company);
         if (!("company" in found)) {
           return {
@@ -457,10 +464,11 @@ export function buildServer(env: ToolEnv): McpServer {
               name: c.name,
               slug: c.slug,
               area: c.area ?? undefined,
+              latest_year: c.latest_year ?? undefined,
               reference_total_kr_per_year_incl_vat: c.reference?.total_kr_per_year_incl_vat,
             })),
             message: found.candidates.length
-              ? "Several grid companies match. Ask the user which one is on their grid bill, then call again with its slug."
+              ? "Several grid companies or grid areas match. Areas with current figures come first. Ask the user which one is on their grid bill (or where they live), then call again with its slug."
               : "No grid company matches. Ask for the name on the user's grid bill (elnätsfaktura). It's often not the electricity supplier.",
             source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
           };
@@ -489,6 +497,10 @@ export function buildServer(env: ToolEnv): McpServer {
         return {
           company: detail.name,
           slug: detail.slug,
+          warning:
+            detail.latest_year && newest && detail.latest_year < newest
+              ? `There are no figures for this grid area after ${detail.latest_year}. It may have been merged into another of the company's areas.`
+              : undefined,
           legal_name: detail.legal_name,
           area: detail.area ?? undefined,
           customer_types: customers,

@@ -233,7 +233,7 @@ function words(s: string): string[] {
 }
 
 /** Companies matching the user's words, best first. */
-export function searchCompanies(companies: GridCompany[], query: string, limit = 8): GridCompany[] {
+export function searchCompanies(companies: GridCompany[], query: string, limit = 15): GridCompany[] {
   const q = normalize(query);
   const qWords = words(query);
   if (!q) return [];
@@ -255,16 +255,21 @@ export function searchCompanies(companies: GridCompany[], query: string, limit =
 
 export type Resolved = { company: GridCompany } | { candidates: GridCompany[] };
 
-/** One company if the words point at one, otherwise the candidates. */
+/**
+ * One company if the words point at one, otherwise the candidates. Big companies have several grid areas
+ * (Ellevio, Vattenfall, E.ON), some of them old ones with no recent figures; areas with current figures win.
+ */
 export function resolveCompany(companies: GridCompany[], query: string): Resolved {
-  const hits = searchCompanies(companies, query);
+  const hits = searchCompanies(companies, query, 40);
   if (hits.length === 1) return { company: hits[0]! };
-  if (hits.length > 1) {
-    const q = normalize(query);
-    const exact = hits.filter((c) => c.slug === query.trim().toLowerCase() || normalize(c.name) === q || normalize(c.legal_name ?? "") === q);
-    if (exact.length === 1) return { company: exact[0]! };
-  }
-  return { candidates: hits };
+  if (!hits.length) return { candidates: [] };
+  const q = normalize(query);
+  const exact = hits.filter((c) => c.slug === query.trim().toLowerCase() || normalize(c.name) === q || normalize(c.legal_name ?? "") === q);
+  if (exact.length === 1) return { company: exact[0]! };
+  const newest = hits.reduce((y, c) => (c.latest_year && c.latest_year > y ? c.latest_year : y), "");
+  const current = hits.filter((c) => c.latest_year === newest);
+  if (current.length === 1) return { company: current[0]! };
+  return { candidates: [...current, ...hits.filter((c) => c.latest_year !== newest)].slice(0, 15) };
 }
 
 /** The standard customer that best matches the user's words, or the reference customer. */
