@@ -142,6 +142,11 @@ export function buildServer(env: ToolEnv): McpServer {
           : `No grid company matches "${args.grid_company}". Ask the user for the name on their grid bill (elnätsfaktura), or search with get_grid_fees.`,
       );
     }
+    // An old area is often merged into one of the company's current areas.
+    const currentSiblings = (c: GridCompany) => {
+      const same = companies.filter((o) => o.slug !== c.slug && o.legal_name && o.legal_name === c.legal_name && o.latest_year === newest);
+      return same.length ? `The company's grid areas with current figures: ${companyList(same)}. ` : "";
+    };
     const detail = await grid.company(found.company.slug);
     const customer = detail && pickCustomer(detail, args.grid_customer_type, found.company.reference?.customer);
     const picked = customer && feeForYear(customer, year);
@@ -165,7 +170,9 @@ export function buildServer(env: ToolEnv): McpServer {
         used: own ? "Not used for the price: the grid_fee you gave was used instead." : "Used as the grid fee per kWh.",
         warning:
           Number(picked.year) < year - 1
-            ? `The newest figures for this grid area are from ${picked.year}, so the fee has probably changed since. Tell the user, and use grid_fee_ore if they know their current överföringsavgift.`
+            ? `The newest figures for this grid area are from ${picked.year}, so the fee has probably changed since. ` +
+              currentSiblings(found.company) +
+              "Tell the user, and use grid_fee_ore if they know their current överföringsavgift."
             : undefined,
         notes: detail.limitations?.length ? detail.limitations : undefined,
         source: `${GRID_SOURCE} (${GRID_SOURCE_URL})`,
