@@ -12,8 +12,9 @@ import {
   VAT,
 } from "./analysis";
 import { AREAS, ElprisClient, FIRST_DATE, PriceError, type Area, type Quarter } from "./elpris";
+import { energyTax, hasCostSettings, missingParts, totalPrice, type CostSettings } from "./costs";
 import { KINDS, MAX_MESSAGE, saveFeedback } from "./feedback";
-import { addDays, isDate, localDate, localTime, parseLocal } from "./time";
+import { addDays, isDate, localDate, localTime, parseLocal, zonedToUtc } from "./time";
 
 export interface ToolEnv {
   ELPRIS_BASE_URL?: string;
@@ -36,6 +37,41 @@ const area = z
 const date = z.string().refine(isDate, "Use YYYY-MM-DD").describe("Date as YYYY-MM-DD (Swedish time); defaults to today");
 const withVat = z.boolean().optional().describe("Add 25 % VAT (moms) to the spot price. Default false.");
 
+// The user's own fees, for the real price per kWh. Flat so they're easy to fill in.
+const costParams = {
+  grid_fee_ore: z
+    .number()
+    .min(0)
+    .max(300)
+    .optional()
+    .describe("The user's grid transfer fee (överföringsavgift / elöverföring), öre/kWh, from the grid bill or price list"),
+  grid_fee_percent_of_spot: z
+    .number()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe("For spot-indexed grid tariffs (fixed part + X % of the spot price): the percentage, e.g. 6.19"),
+  supplier_markup_ore: z
+    .number()
+    .min(-50)
+    .max(200)
+    .optional()
+    .describe("The electricity supplier's markup incl. certificates (påslag + elcertifikat), öre/kWh"),
+  fees_include_vat: z.boolean().optional().describe("Whether the fees above include VAT (default true, as consumer price lists usually do)"),
+  northern_tax_reduction: z
+    .boolean()
+    .optional()
+    .describe("Household in a northern municipality with reduced energy tax (9.6 öre/kWh lower)"),
+};
+const pickCosts = (a: CostSettings): CostSettings => ({
+  grid_fee_ore: a.grid_fee_ore,
+  grid_fee_percent_of_spot: a.grid_fee_percent_of_spot,
+  supplier_markup_ore: a.supplier_markup_ore,
+  fees_include_vat: a.fees_include_vat,
+  northern_tax_reduction: a.northern_tax_reduction,
+});
+const NOT_INCLUDED_ALWAYS = "fixed monthly fees and power fees (effektavgift), which don't depend on kWh";
+
 export function buildServer(env: ToolEnv): McpServer {
   const server = new McpServer(
     { name: "elpriskollen", version: "1.0.0" },
@@ -45,7 +81,8 @@ export function buildServer(env: ToolEnv): McpServer {
         "Prices are the raw spot price: they exclude the supplier's markup, energy tax (energiskatt), grid fees (elnät) " +
         "and, unless include_vat is set, VAT. Say this when talking about what electricity costs. " +
         PUBLISH_NOTE +
-        " Use find_cheapest_time for 'when should I run the dishwasher / washing machine / charge the car'. " +
+        " Use find_cheapest_time for 'when should I run the dishwasher / washing machine / charge the car', " +
+        "and get_total_price for what electricity actually costs per kWh with energy tax, VAT and the user's own fees. " +
         "If the user wants something Elpriskollen can't do yet, you may offer to pass it on with send_feedback. " +
         "Data: Elpriset just nu.se. Answer in the user's language (usually Swedish).",
     },
@@ -163,13 +200,16 @@ export function buildServer(env: ToolEnv): McpServer {
           .optional()
           .describe("Must be finished by, 'HH:MM' (next time after earliest) or 'YYYY-MM-DD HH:MM'. Default: last published price"),
         together: z.boolean().optional().describe("Run in one go (default true) or allow separate periods (false)"),
-        kwh: z.number().positive().max(500).optional().describe("Energy it uses in total, kWh, to estimate the spot cost"),
+        kwh: z.number().positive().max(500).optional().describe("Energy it uses in total, kWh, to estimate the cost"),
         include_vat: withVat,
+        ...costParams,
       }),
       annotations: READ_ONLY,
     },
-    async ({ area: a, minutes, earliest, latest, together, kwh, include_vat }) =>
+    async ({ area: a, minutes, earliest, latest, together, kwh, include_vat, ...rest }) =>
       run(async () => {
+        const costs = pickCosts(rest);
+        const withCosts = hasCostSettings(costs);
         const t = now();
         const vat = include_vat ?? false;
         const from = earliest ? parseLocal(earliest, t) : t;
@@ -187,6 +227,12 @@ export function buildServer(env: ToolEnv): McpServer {
 
         const unit = vat ? "öre/kWh incl. VAT" : "öre/kWh excl. VAT";
         const cost = (sek: number) => (kwh ? Math.round(sek * kwh * (vat ? 1 + VAT : 1) * 100) / 100 : undefined);
+        // With the user's fees: the full price per kWh and what the run costs in total, incl. VAT.
+        const real = (w: { start: number; sek: number }) => {
+          if (!withCosts) return undefined;
+          const b = totalPrice(w.sek, Number(localDate(w.start).slice(0, 4)), costs);
+          return { total_ore_per_kwh_incl_vat: b.total, total_cost_kr: kwh ? Math.round(b.total * kwh) / 100 : undefined };
+        };
         const base = {
           area: a,
           unit,
@@ -204,6 +250,8 @@ export function buildServer(env: ToolEnv): McpServer {
             periods: found.runs.map((r) => describeWindow(r, vat, t)),
             average_ore: ore(found.sek, vat),
             spot_cost_kr: cost(found.sek),
+            with_your_fees: real({ start: found.runs[0]!.start, sek: found.sek }),
+            not_included: withCosts ? [...missingParts(costs), NOT_INCLUDED_ALWAYS] : undefined,
             source: SOURCE,
           };
         }
@@ -219,14 +267,77 @@ export function buildServer(env: ToolEnv): McpServer {
         return {
           ...base,
           mode: "in one go",
-          cheapest: { ...describeWindow(best, vat, t), spot_cost_kr: cost(best.sek) },
+          cheapest: { ...describeWindow(best, vat, t), spot_cost_kr: cost(best.sek), with_your_fees: real(best) },
           [earliest ? "if_started_at_earliest" : "if_started_now"]: startNow
-            ? { ...describeWindow(startNow, vat, t), spot_cost_kr: cost(startNow.sek), cheapest_saves: saving(startNow) }
+            ? { ...describeWindow(startNow, vat, t), spot_cost_kr: cost(startNow.sek), with_your_fees: real(startNow), cheapest_saves: saving(startNow) }
             : undefined,
-          most_expensive: { ...describeWindow(worst, vat, t), cheapest_saves: saving(worst) },
+          most_expensive: { ...describeWindow(worst, vat, t), with_your_fees: real(worst), cheapest_saves: saving(worst) },
+          not_included: withCosts ? [...missingParts(costs), NOT_INCLUDED_ALWAYS] : undefined,
           rounded_to: found.windowMinutes !== minutes ? `${found.windowMinutes} minutes (prices come per ${found.slotMinutes} minutes)` : undefined,
           tomorrow_published: lastPublished !== undefined && lastPublished > localDate(t),
           source: SOURCE,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "get_total_price",
+    {
+      title: "What electricity really costs",
+      description:
+        "The real price per kWh incl. VAT: spot price + energy tax (36.0 öre/kWh excl. VAT in 2026, Skatteverket) + VAT, " +
+        "plus the user's grid transfer fee and supplier markup when given. Shows the breakdown right now (or at a given " +
+        "time) and the day's average, lowest and highest total. For the full price, ask the user for their " +
+        "överföringsavgift (öre/kWh, on the grid bill or the grid company's price list) and their supplier's påslag; " +
+        "without them the answer covers spot + energy tax + VAT and lists what's missing. Spot-indexed grid tariffs " +
+        "(a fixed part plus a percent of the spot price) use grid_fee_percent_of_spot. Fixed monthly fees and " +
+        "effektavgift are never included.",
+      inputSchema: z.object({
+        area,
+        date: date.optional(),
+        at: z.string().regex(/^\d{1,2}:\d{2}$/, "Use HH:MM").optional().describe("Time of day HH:MM for the breakdown; default now (today)"),
+        ...costParams,
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ area: a, date: d, at, ...rest }) =>
+      run(async () => {
+        const t = now();
+        const costs = pickCosts(rest);
+        const day = d ?? localDate(t);
+        const qs = await client.day(a, day);
+        if (!qs) return notPublished(a, day, t);
+        const year = Number(day.slice(0, 4));
+        const tax = energyTax(year, costs.northern_tax_reduction);
+
+        let moment: Quarter | undefined;
+        if (at) {
+          const [h, m] = at.split(":").map(Number) as [number, number];
+          if (h > 23 || m > 59) throw new Error(`"${at}" is not a time of day.`);
+          const ms = zonedToUtc(day, `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`);
+          moment = qs.find((q) => q.start <= ms && ms < q.end);
+          if (!moment) throw new Error(`No price at ${at} on ${day}.`);
+        } else if (day === localDate(t)) {
+          moment = qs.find((q) => q.start <= t && t < q.end);
+        }
+
+        const cheapest = qs.reduce((x, y) => (y.sek < x.sek ? y : x));
+        const dearest = qs.reduce((x, y) => (y.sek > x.sek ? y : x));
+        const avg = totalPrice(average(qs), year, costs);
+        return {
+          area: a,
+          date: day,
+          unit: "öre/kWh incl. VAT",
+          at: moment ? { from: localTime(moment.start), to: localTime(moment.end), ...totalPrice(moment.sek, year, costs) } : undefined,
+          day: {
+            average: avg,
+            lowest: { at: localTime(cheapest.start), total: totalPrice(cheapest.sek, year, costs).total },
+            highest: { at: localTime(dearest.start), total: totalPrice(dearest.sek, year, costs).total },
+          },
+          spot_share_of_average: avg.total > 0 ? `${Math.round((avg.spot / avg.total) * 100)} %` : undefined,
+          energy_tax_rate: `${tax.ore} öre/kWh excl. VAT for ${year}${costs.northern_tax_reduction ? " (with the northern reduction)" : ""}${tax.assumed ? " (assumed: latest known rate)" : ""}`,
+          not_included: [...missingParts(costs), NOT_INCLUDED_ALWAYS],
+          source: `${SOURCE}; energy tax: Skatteverket`,
         };
       }),
   );

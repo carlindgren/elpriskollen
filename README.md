@@ -15,6 +15,7 @@ https://elpriskollen.carlindgren.workers.dev/mcp
 - *Är elen dyr just nu i Stockholm?*
 - *Hur skiljer sig priset mellan SE1 och SE4 idag?*
 - *Hur dyr var elen i oktober?*
+- *Vad kostar elen egentligen per kWh just nu, med skatt och moms? Jag har 25 öre i överföringsavgift och 6 öre i påslag.*
 
 ## Verktyg
 
@@ -23,11 +24,14 @@ https://elpriskollen.carlindgren.workers.dev/mcp
 | `get_prices` | Priser timme för timme eller per kvart för en dag, med snitt, lägsta, högsta, billigaste och dyraste timme |
 | `get_current_price` | Priset just nu, hur det står sig mot resten av dagen och de närmaste timmarna |
 | `find_cheapest_time` | Den billigaste tiden att köra något, till exempel disk, tvätt eller bilen, inom ett tidsfönster. Svaret visar också hur mycket billigare det är än att starta nu och ungefärlig kostnad om man anger kWh. Den kan även välja flera separata perioder. |
+| `get_total_price` | Vad elen faktiskt kostar per kWh: spotpris plus energiskatt och moms, och elbolagets påslag och nätbolagets överföringsavgift om man anger dem. Gäller nu, en viss tid eller dagens snitt. |
 | `compare_areas` | Snitt, lägsta och högsta pris i SE1–SE4 för en dag |
 | `get_daily_averages` | Dagssnitt för upp till 31 dagar, med periodens billigaste och dyraste dag |
 | `send_feedback` | Skickar ett förslag eller en felrapport till utvecklaren. Claude använder det bara när användaren ber om det. |
 
 Priserna är Nord Pools spotpris, utan elbolagets påslag, energiskatt och nätavgift. Moms läggs till om man ber om det. Morgondagens priser publiceras runt kl 13.
+
+`get_total_price` och `find_cheapest_time` räknar också fram totalpriset. Energiskatten följer Skatteverkets nivå för året (36,0 öre/kWh exkl. moms 2026, 9,6 öre lägre i de norra kommunerna med reducerad skatt). Påslag och överföringsavgift anger man själv, antingen i öre/kWh eller som procent av spotpriset för nätbolag med spotindexerad avgift. Fasta månadsavgifter och effektavgifter räknas inte in eftersom de inte beror på hur många kWh man använder.
 
 ## Förslag och feedback
 

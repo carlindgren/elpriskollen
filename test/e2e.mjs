@@ -69,7 +69,7 @@ try {
     const client = new Client({ name: "e2e", version: "1" }, { versionNegotiation: { mode } });
     await client.connect(new StreamableHTTPClientTransport(new URL(`${WORKER}/mcp`)));
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices", "send_feedback"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["compare_areas", "find_cheapest_time", "get_current_price", "get_daily_averages", "get_prices", "get_total_price", "send_feedback"]);
     assert.ok(tools.filter((t) => t.name !== "send_feedback").every((t) => t.annotations?.readOnlyHint === true));
     assert.equal(tools.find((t) => t.name === "send_feedback").annotations.readOnlyHint, false);
     assert.ok(tools.every((t) => t.title || t.annotations?.title));
@@ -116,6 +116,20 @@ try {
 
     const bad = await call("find_cheapest_time", { area: "SE3", minutes: 60, earliest: "2026-11-01 10:00" });
     assert.match(bad.error, /past/);
+
+    const total = await call("get_total_price", { area: "SE3", grid_fee_ore: 25, supplier_markup_ore: 6 });
+    // fixture at 20:00 SE3 2026-11-03: 0.93 SEK -> 116.25 + 45 tax + 25 grid + 6 markup
+    assert.deepEqual([total.at.from, total.at.spot, total.at.energy_tax, total.at.total], ["20:00", 116.3, 45, 192.3]);
+    assert.deepEqual(total.not_included.length, 1); // only fixed/power fees
+    assert.match(total.energy_tax_rate, /36 öre\/kWh excl\. VAT for 2026/);
+    const bare = await call("get_total_price", { area: "SE1", date: "2026-11-04", at: "03:10", northern_tax_reduction: true });
+    assert.equal(bare.at.from, "03:00");
+    assert.equal(bare.at.energy_tax, 33);
+    assert.equal(bare.not_included.length, 3);
+    const dishTotal = await call("find_cheapest_time", { area: "SE3", minutes: 120, earliest: "22:00", latest: "07:00", kwh: 1.2, grid_fee_ore: 25, supplier_markup_ore: 6 });
+    assert.ok(dishTotal.cheapest.with_your_fees.total_cost_kr > dishTotal.cheapest.spot_cost_kr);
+    assert.ok(dishTotal.if_started_at_earliest.with_your_fees.total_cost_kr > dishTotal.cheapest.with_your_fees.total_cost_kr);
+    if (mode === "legacy") console.log("  total price now:", JSON.stringify(total.at), "| dishwasher with fees:", JSON.stringify(dishTotal.cheapest.with_your_fees));
 
     const areas = await call("compare_areas", {});
     assert.deepEqual(areas.areas.map((a) => a.area), ["SE1", "SE2", "SE3", "SE4"]);
